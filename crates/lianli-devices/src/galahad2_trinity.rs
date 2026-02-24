@@ -7,9 +7,10 @@
 //! RPM is read via the handshake command (0x81).
 //! No coolant temperature sensor — CPU temp must come from the system.
 
-use crate::traits::{AioDevice, FanDevice};
+use crate::traits::{AioDevice, FanDevice, RgbDevice};
 use anyhow::{bail, Context, Result};
 use hidapi::HidDevice;
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use parking_lot::Mutex;
 use tracing::{debug, info, warn};
 
@@ -18,11 +19,18 @@ const PACKET_SIZE: usize = 64;
 const HEADER_LEN: usize = 6;
 const READ_TIMEOUT_MS: i32 = 200;
 
-// A-Commands
+// A-Commands — Control
 const CMD_HANDSHAKE: u8 = 0x81;
 const CMD_GET_FIRMWARE: u8 = 0x86;
 const CMD_SET_PUMP_PWM: u8 = 0x8A;
 const CMD_SET_FAN_PWM: u8 = 0x8B;
+
+// A-Commands — LED (from decompiled Galahad2TrinityDevice.cs)
+const CMD_SET_PUMP_LIGHT: u8 = 0x83;
+const CMD_SET_FAN_LIGHT: u8 = 0x85;
+
+/// Default number of LEDs on each radiator fan.
+const FAN_LED_COUNT: u16 = 24;
 
 /// Galahad2 Trinity model variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,8 +67,8 @@ pub struct Galahad2Handshake {
 
 /// Galahad II Trinity AIO controller.
 ///
-/// Provides pump + fan speed control. Does NOT have LCD or coolant temp sensor.
-/// Does NOT touch RGB/LED effects — that's OpenRGB's domain.
+/// Provides pump + fan speed control and RGB/LED effects.
+/// Does NOT have LCD or coolant temp sensor.
 pub struct Galahad2TrinityController {
     device: Mutex<HidDevice>,
     model: Galahad2TrinityModel,
@@ -134,6 +142,94 @@ impl Galahad2TrinityController {
 
     pub fn model(&self) -> Galahad2TrinityModel {
         self.model
+    }
+
+    // -- LED control methods --
+
+    /// Set pump LED effect.
+    ///
+    /// From decompiled Galahad2TrinityDevice.cs SetPumpLighting().
+    /// Uses CMD_SET_PUMP_LIGHT (0x83) with 19-byte payload:
+    /// ```text
+    /// [0]  = scope (0=Inner, 1=Outer, 2=All)
+    /// [1]  = mode % 1000
+    /// [2]  = brightness (0-4)
+    /// [3]  = speed (0-4)
+    /// [4-15] = R,G,B × 4 colors
+    /// [16] = direction (0-5)
+    /// [17] = disabled (0=enabled, 1=disabled)
+    /// [18] = ARGB source (0=MCU, 1=Motherboard)
+    /// ```
+    pub fn set_pump_light(&self, effect: &RgbEffect, source_mcu: bool) -> Result<()> {
+        let scope = match effect.scope {
+            RgbScope::Inner => 0u8,
+            RgbScope::Outer => 1,
+            _ => 2, // All
+        };
+
+        let mode_byte = effect.mode.to_tl_mode_byte().unwrap_or(3);
+
+        let mut payload = [0u8; 19];
+        payload[0] = scope;
+        payload[1] = mode_byte;
+        payload[2] = effect.brightness.min(4);
+        payload[3] = effect.speed.min(4);
+
+        for (i, color) in effect.colors.iter().take(4).enumerate() {
+            let offset = 4 + i * 3;
+            payload[offset] = color[0];
+            payload[offset + 1] = color[1];
+            payload[offset + 2] = color[2];
+        }
+
+        payload[16] = effect.direction.to_tl_byte();
+        payload[17] = if effect.mode == RgbMode::Off { 1 } else { 0 };
+        payload[18] = if source_mcu { 0 } else { 1 };
+
+        self.send_a_command(CMD_SET_PUMP_LIGHT, &payload)?;
+        debug!("Set pump light: mode={mode_byte} scope={scope}");
+        Ok(())
+    }
+
+    /// Set radiator fan LED effect.
+    ///
+    /// From decompiled Galahad2TrinityDevice.cs SetFanLighting().
+    /// Uses CMD_SET_FAN_LIGHT (0x85) with 20-byte payload:
+    /// ```text
+    /// [0]  = mode % 1000
+    /// [1]  = brightness (0-4)
+    /// [2]  = speed (0-4)
+    /// [3-14] = R,G,B × 4 colors
+    /// [15] = direction (0-5)
+    /// [16] = disabled (0=enabled, 1=disabled)
+    /// [17] = ARGB source (0=MCU, 1=Motherboard)
+    /// [18] = sync to pump (0=independent, 1=sync)
+    /// [19] = number of LEDs (default 24)
+    /// ```
+    pub fn set_fan_light(&self, effect: &RgbEffect, source_mcu: bool, sync_to_pump: bool) -> Result<()> {
+        let mode_byte = effect.mode.to_tl_mode_byte().unwrap_or(3);
+
+        let mut payload = [0u8; 20];
+        payload[0] = mode_byte;
+        payload[1] = effect.brightness.min(4);
+        payload[2] = effect.speed.min(4);
+
+        for (i, color) in effect.colors.iter().take(4).enumerate() {
+            let offset = 3 + i * 3;
+            payload[offset] = color[0];
+            payload[offset + 1] = color[1];
+            payload[offset + 2] = color[2];
+        }
+
+        payload[15] = effect.direction.to_tl_byte();
+        payload[16] = if effect.mode == RgbMode::Off { 1 } else { 0 };
+        payload[17] = if source_mcu { 0 } else { 1 };
+        payload[18] = sync_to_pump as u8;
+        payload[19] = FAN_LED_COUNT as u8;
+
+        self.send_a_command(CMD_SET_FAN_LIGHT, &payload)?;
+        debug!("Set fan light: mode={mode_byte} sync_to_pump={sync_to_pump}");
+        Ok(())
     }
 
     // -- Packet helpers --
@@ -210,5 +306,57 @@ impl AioDevice for Galahad2TrinityController {
     fn read_coolant_temp(&self) -> Result<f32> {
         // Trinity has NO coolant temperature sensor
         bail!("Galahad2 Trinity does not have a coolant temperature sensor")
+    }
+}
+
+/// Galahad2 Trinity LED zones:
+///   Zone 0 = Pump head (inner + outer LEDs)
+///   Zone 1 = Radiator fans
+impl RgbDevice for Galahad2TrinityController {
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        vec![
+            RgbMode::Off,
+            RgbMode::Static,
+            RgbMode::Rainbow,
+            RgbMode::RainbowMorph,
+            RgbMode::Breathing,
+            RgbMode::Runway,
+            RgbMode::Meteor,
+            RgbMode::ColorCycle,
+            RgbMode::Staggered,
+            RgbMode::Tide,
+            RgbMode::Mixing,
+            RgbMode::Ripple,
+            RgbMode::Reflect,
+            RgbMode::TailChasing,
+            RgbMode::Paint,
+            RgbMode::PingPong,
+            // Pump-specific modes
+            RgbMode::BigBang,
+            RgbMode::Vortex,
+            RgbMode::Pump,
+            RgbMode::ColorsMorph,
+        ]
+    }
+
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        vec![
+            RgbZoneInfo {
+                name: "Pump Head".to_string(),
+                led_count: 24, // Approximate pump LED count
+            },
+            RgbZoneInfo {
+                name: "Fans".to_string(),
+                led_count: FAN_LED_COUNT,
+            },
+        ]
+    }
+
+    fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
+        match zone {
+            0 => self.set_pump_light(effect, true),
+            1 => self.set_fan_light(effect, true, false),
+            _ => bail!("Galahad2 Trinity: zone {zone} out of range (0-1)"),
+        }
     }
 }

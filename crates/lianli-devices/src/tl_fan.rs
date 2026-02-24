@@ -10,9 +10,10 @@
 //! Fan speed is set per-fan via command 0xAA.
 //! RPM values are only available from the handshake response (0xA1).
 
-use crate::traits::FanDevice;
+use crate::traits::{FanDevice, RgbDevice};
 use anyhow::{bail, Context, Result};
 use hidapi::HidDevice;
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
 use parking_lot::Mutex;
 use tracing::{debug, info, warn};
 
@@ -22,11 +23,21 @@ const HEADER_LEN: usize = 6;
 const MAX_PAYLOAD: usize = PACKET_SIZE - HEADER_LEN;
 const READ_TIMEOUT_MS: i32 = 100;
 
-// Commands
+// Commands — Fan control
 const CMD_HANDSHAKE: u8 = 0xA1;
 const CMD_GET_PRODUCT_INFO: u8 = 0xA6;
 const CMD_SET_FAN_SPEED: u8 = 0xAA;
 const CMD_SET_MB_RPM_SYNC: u8 = 0xB1;
+
+// Commands — LED control (from decompiled L-Connect 3 LEDCommands.cs)
+const CMD_SET_FAN_LIGHT: u8 = 0xA3;
+const CMD_SET_FAN_GROUP_LIGHT: u8 = 0xB0;
+const CMD_SET_FAN_GROUP: u8 = 0xAD;
+const CMD_SET_FAN_DIRECTION: u8 = 0xAE;
+const CMD_SET_PORT_DIRECTION: u8 = 0xAF;
+
+/// Number of LEDs per TL fan.
+const LEDS_PER_FAN: u16 = 20;
 
 /// Information about a single detected fan.
 #[derive(Debug, Clone)]
@@ -49,8 +60,7 @@ pub struct TlFanHandshake {
 /// TL Fan controller.
 ///
 /// Wraps an opened HID device for a TL Fan controller (0x0416:0x7372).
-/// Provides fan speed control and RPM reading via the handshake protocol.
-/// Does NOT touch RGB/LED effects — that's OpenRGB's domain.
+/// Provides fan speed control, RPM reading, and RGB/LED effects.
 pub struct TlFanController {
     device: Mutex<HidDevice>,
     /// Last handshake result (updated on each handshake call).
@@ -243,6 +253,134 @@ impl TlFanController {
             .unwrap_or(0)
     }
 
+    // -- LED control methods --
+
+    /// Set LED effect for a fan group on a port.
+    ///
+    /// Uses SetFanGroupLight (0xB0) command with 20-byte payload.
+    /// From decompiled TLFanDevice.cs SetGroupLight().
+    ///
+    /// Payload layout:
+    /// ```text
+    /// [0]  = 0x00 (reserved)
+    /// [1]  = group_num
+    /// [2]  = mode % 1000 (effect mode byte)
+    /// [3]  = brightness (0-4)
+    /// [4]  = speed (0-4)
+    /// [5-16] = R,G,B × 4 colors (12 bytes)
+    /// [17] = direction (0-5)
+    /// [18] = disable flag (0=enabled, 1=disabled)
+    /// [19] = color count
+    /// ```
+    pub fn set_group_light(&self, group: u8, effect: &RgbEffect) -> Result<()> {
+        let mode_byte = effect
+            .mode
+            .to_tl_mode_byte()
+            .unwrap_or(3); // Default to Static(3)
+
+        let mut payload = [0u8; 20];
+        payload[0] = 0x00;
+        payload[1] = group;
+        payload[2] = mode_byte;
+        payload[3] = effect.brightness.min(4);
+        payload[4] = effect.speed.min(4);
+
+        // Fill up to 4 RGB colors
+        let color_count = effect.colors.len().min(4);
+        for (i, color) in effect.colors.iter().take(4).enumerate() {
+            let offset = 5 + i * 3;
+            payload[offset] = color[0];     // R
+            payload[offset + 1] = color[1]; // G
+            payload[offset + 2] = color[2]; // B
+        }
+
+        payload[17] = effect.direction.to_tl_byte();
+        payload[18] = if effect.mode == RgbMode::Off { 1 } else { 0 };
+        payload[19] = color_count as u8;
+
+        self.send_command_quiet(CMD_SET_FAN_GROUP_LIGHT, &payload)?;
+        debug!(
+            "Set group {group} light: mode={mode_byte} brightness={} speed={} colors={color_count}",
+            effect.brightness, effect.speed
+        );
+        Ok(())
+    }
+
+    /// Set LED effect for a specific fan on a port.
+    ///
+    /// Uses SetFanLight (0xA3) command with 20-byte payload.
+    /// From decompiled TLFanDevice.cs SetFanLight().
+    ///
+    /// Payload layout:
+    /// ```text
+    /// [0]  = (port << 4) | is_sync
+    /// [1]  = (port << 4) | fan_index
+    /// [2]  = mode % 1000
+    /// [3]  = brightness (0-4)
+    /// [4]  = speed (0-4)
+    /// [5-16] = R,G,B × 4 colors
+    /// [17] = direction (0-5)
+    /// [18] = disable flag
+    /// [19] = color count
+    /// ```
+    pub fn set_fan_light(&self, port: u8, fan_index: u8, effect: &RgbEffect, sync: bool) -> Result<()> {
+        if port >= 4 {
+            bail!("Port {port} out of range (0-3)");
+        }
+
+        let mode_byte = effect
+            .mode
+            .to_tl_mode_byte()
+            .unwrap_or(3);
+
+        let mut payload = [0u8; 20];
+        payload[0] = (port << 4) | (sync as u8);
+        payload[1] = (port << 4) | (fan_index & 0x0F);
+        payload[2] = mode_byte;
+        payload[3] = effect.brightness.min(4);
+        payload[4] = effect.speed.min(4);
+
+        let color_count = effect.colors.len().min(4);
+        for (i, color) in effect.colors.iter().take(4).enumerate() {
+            let offset = 5 + i * 3;
+            payload[offset] = color[0];
+            payload[offset + 1] = color[1];
+            payload[offset + 2] = color[2];
+        }
+
+        payload[17] = effect.direction.to_tl_byte();
+        payload[18] = if effect.mode == RgbMode::Off { 1 } else { 0 };
+        payload[19] = color_count as u8;
+
+        self.send_command_quiet(CMD_SET_FAN_LIGHT, &payload)?;
+        debug!(
+            "Set port {port} fan {fan_index} light: mode={mode_byte} sync={sync}"
+        );
+        Ok(())
+    }
+
+    /// Set fan direction flags for a specific fan.
+    ///
+    /// From decompiled TLFanDevice.cs SetFanDirection().
+    /// Data: `[(port<<4)|fanIndex, (swapTopBot<<1)|swapLR]`
+    pub fn set_fan_direction(&self, port: u8, fan_index: u8, swap_lr: bool, swap_tb: bool) -> Result<()> {
+        let addr = (port << 4) | (fan_index & 0x0F);
+        let flags = ((swap_tb as u8) << 1) | (swap_lr as u8);
+        self.send_command_quiet(CMD_SET_FAN_DIRECTION, &[addr, flags])?;
+        debug!("Set fan direction port={port} fan={fan_index} swap_lr={swap_lr} swap_tb={swap_tb}");
+        Ok(())
+    }
+
+    /// Set port-level direction swap.
+    ///
+    /// From decompiled TLFanDevice.cs SetPortDirection().
+    /// Data: `[(port<<4), isSwap]`
+    pub fn set_port_direction(&self, port: u8, swap: bool) -> Result<()> {
+        self.send_command_quiet(CMD_SET_PORT_DIRECTION, &[port << 4, swap as u8])?;
+        debug!("Set port {port} direction swap={swap}");
+        Ok(())
+    }
+
     // -- Low-level packet helpers --
 
     /// Build a TL Fan packet.
@@ -381,5 +519,85 @@ impl FanDevice for TlFanController {
 
     fn set_mb_rpm_sync(&self, port: u8, sync: bool) -> Result<()> {
         self.set_port_mb_rpm_sync(port, sync)
+    }
+}
+
+/// TL Fan LED zones: one zone per active port (port with detected fans).
+/// Each zone covers all fans on that port via SetFanGroupLight.
+impl RgbDevice for TlFanController {
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        vec![
+            RgbMode::Off,
+            RgbMode::Static,
+            RgbMode::Rainbow,
+            RgbMode::RainbowMorph,
+            RgbMode::Breathing,
+            RgbMode::Runway,
+            RgbMode::Meteor,
+            RgbMode::ColorCycle,
+            RgbMode::Staggered,
+            RgbMode::Tide,
+            RgbMode::Mixing,
+            RgbMode::Voice,
+            RgbMode::Door,
+            RgbMode::Render,
+            RgbMode::Ripple,
+            RgbMode::Reflect,
+            RgbMode::TailChasing,
+            RgbMode::Paint,
+            RgbMode::PingPong,
+            RgbMode::Stack,
+            RgbMode::CoverCycle,
+            RgbMode::Wave,
+            RgbMode::Racing,
+            RgbMode::Lottery,
+            RgbMode::Intertwine,
+            RgbMode::MeteorShower,
+            RgbMode::Collide,
+            RgbMode::ElectricCurrent,
+            RgbMode::Kaleidoscope,
+        ]
+    }
+
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        let guard = self.last_handshake.lock();
+        match guard.as_ref() {
+            Some(hs) => hs
+                .port_fan_counts
+                .iter()
+                .enumerate()
+                .filter(|(_, &count)| count > 0)
+                .map(|(port, &count)| RgbZoneInfo {
+                    name: format!("Port {port}"),
+                    led_count: count as u16 * LEDS_PER_FAN,
+                })
+                .collect(),
+            None => vec![],
+        }
+    }
+
+    fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
+        // Zone index maps to port index (only counting active ports)
+        let guard = self.last_handshake.lock();
+        let port = match guard.as_ref() {
+            Some(hs) => {
+                let active_ports: Vec<u8> = hs
+                    .port_fan_counts
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, &count)| count > 0)
+                    .map(|(port, _)| port as u8)
+                    .collect();
+                active_ports
+                    .get(zone as usize)
+                    .copied()
+                    .ok_or_else(|| anyhow::anyhow!("Zone {zone} out of range"))?
+            }
+            None => bail!("No handshake data available"),
+        };
+        drop(guard);
+
+        // Use group 0 for the port (SetFanGroupLight targets all fans in the group)
+        self.set_group_light(port, effect)
     }
 }

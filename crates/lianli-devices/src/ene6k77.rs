@@ -6,9 +6,10 @@
 //! Each controller has 4 fan groups with independent PWM duty control.
 //! RPM is read via feature report 0x50 sub-command 0x00.
 
-use crate::traits::FanDevice;
+use crate::traits::{FanDevice, RgbDevice};
 use anyhow::{bail, Context, Result};
 use hidapi::HidDevice;
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
 use parking_lot::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -106,8 +107,8 @@ impl std::fmt::Display for Ene6k77Firmware {
 
 /// ENE 6K77 fan controller.
 ///
-/// Wraps an opened HID device and provides fan speed control + RPM reading.
-/// Does NOT touch RGB/LED effects — that's OpenRGB's domain.
+/// Wraps an opened HID device and provides fan speed control, RPM reading,
+/// and RGB/LED effects.
 pub struct Ene6k77Controller {
     device: Mutex<HidDevice>,
     model: Ene6k77Model,
@@ -269,6 +270,113 @@ impl Ene6k77Controller {
         self.firmware.as_ref()
     }
 
+    // -- LED control methods --
+
+    /// Number of LEDs per fan for this model.
+    pub fn leds_per_fan(&self) -> u16 {
+        match self.model {
+            Ene6k77Model::SlFan | Ene6k77Model::SlRedragon => 16,
+            Ene6k77Model::SlV2Fan | Ene6k77Model::SlV2aFan => 16,
+            Ene6k77Model::AlFan => 20,   // 8 inner + 12 outer
+            Ene6k77Model::AlV2Fan => 20,  // 8 inner + 12 outer
+            Ene6k77Model::SlInfinity => 20, // 8 inner + 12 outer
+        }
+    }
+
+    /// Set LED effect for a group.
+    ///
+    /// From decompiled SLFanDevice.cs / ALFanDevice.cs.
+    /// Two-step: SetColorSetting (output report) then SetEffectSetting (feature report).
+    ///
+    /// **NOTE**: ENE uses R,B,G byte order (not R,G,B)!
+    pub fn set_group_effect(&self, group: u8, effect: &RgbEffect) -> Result<()> {
+        if group >= 4 {
+            bail!("Group index {group} out of range (0-3)");
+        }
+
+        // Step 1: Set colors via output report
+        // [0xE0, 0x30|port, R,B,G, R,B,G, ...]  — NOTE R,B,G order!
+        let mut color_cmd = vec![REPORT_ID, 0x30 | group];
+        for color in effect.colors.iter().take(4) {
+            color_cmd.push(color[0]); // R
+            color_cmd.push(color[2]); // B (swapped!)
+            color_cmd.push(color[1]); // G (swapped!)
+        }
+        // Pad to at least 12 color bytes (4 colors × 3 bytes)
+        while color_cmd.len() < 14 {
+            color_cmd.push(0);
+        }
+        self.send_feature(&color_cmd)?;
+        thread::sleep(CMD_DELAY);
+
+        // Step 2: Set effect via feature report
+        // SL: [0xE0, 0x10|port, mode, speed, direction, brightness]
+        // AL: [0xE0, 0x10|(port*2), mode, speed, direction, brightness]
+        let port_byte = if self.model.is_al() {
+            0x10 | (group * 2)
+        } else {
+            0x10 | group
+        };
+
+        let mode_byte = self.map_mode_to_ene(effect.mode);
+        let speed_byte = self.map_speed(effect.speed);
+        let dir_byte = effect.direction.to_ene_byte();
+        let brightness_byte = self.map_brightness(effect.brightness);
+
+        self.send_feature(&[REPORT_ID, port_byte, mode_byte, speed_byte, dir_byte, brightness_byte])?;
+        thread::sleep(CMD_DELAY);
+
+        debug!(
+            "Set group {group} effect: mode={mode_byte} speed={speed_byte} dir={dir_byte} brightness={brightness_byte}"
+        );
+        Ok(())
+    }
+
+    /// Map RgbMode to ENE mode byte.
+    fn map_mode_to_ene(&self, mode: RgbMode) -> u8 {
+        // ENE mode mapping (from decompiled LightingMode.cs)
+        // The ENE controllers share similar mode numbering to TL for basic effects
+        match mode {
+            RgbMode::Off => 0,
+            RgbMode::Static => 1,
+            RgbMode::Breathing => 2,
+            RgbMode::ColorCycle => 3,
+            RgbMode::Rainbow => 4,
+            RgbMode::Runway => 5,
+            RgbMode::Meteor => 6,
+            RgbMode::Staggered => 7,
+            RgbMode::Tide => 8,
+            RgbMode::Mixing => 9,
+            _ => 1, // Default to Static for unsupported modes
+        }
+    }
+
+    /// Map 0-4 speed scale to ENE speed byte.
+    /// ENE: Lowest(2), Lower(1), Normal(0), Faster(255), Fastest(254)
+    fn map_speed(&self, speed: u8) -> u8 {
+        match speed {
+            0 => 2,   // Lowest
+            1 => 1,   // Lower
+            2 => 0,   // Normal
+            3 => 255, // Faster
+            4 => 254, // Fastest
+            _ => 0,
+        }
+    }
+
+    /// Map 0-4 brightness scale to ENE brightness byte.
+    /// ENE: Off(8), Lowest(4), Lower(3), Normal(2), Higher(1), Highest(0)
+    fn map_brightness(&self, brightness: u8) -> u8 {
+        match brightness {
+            0 => 4, // Lowest
+            1 => 3, // Lower
+            2 => 2, // Normal
+            3 => 1, // Higher
+            4 => 0, // Highest
+            _ => 2,
+        }
+    }
+
     // -- Low-level HID helpers --
 
     fn send_feature(&self, data: &[u8]) -> Result<()> {
@@ -316,5 +424,42 @@ impl FanDevice for Ene6k77Controller {
 
     fn fan_slot_count(&self) -> u8 {
         4
+    }
+}
+
+/// ENE 6K77 LED zones: one zone per group (4 groups).
+impl RgbDevice for Ene6k77Controller {
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        vec![
+            RgbMode::Off,
+            RgbMode::Static,
+            RgbMode::Breathing,
+            RgbMode::ColorCycle,
+            RgbMode::Rainbow,
+            RgbMode::Runway,
+            RgbMode::Meteor,
+            RgbMode::Staggered,
+            RgbMode::Tide,
+            RgbMode::Mixing,
+        ]
+    }
+
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        let fans_per = self.model.max_fans_per_group();
+        let leds = self.leds_per_fan();
+        (0..4)
+            .map(|g| {
+                let qty = self.fan_quantities[g as usize];
+                let count = if qty > 0 { qty } else { fans_per };
+                RgbZoneInfo {
+                    name: format!("Group {g}"),
+                    led_count: count as u16 * leds,
+                }
+            })
+            .collect()
+    }
+
+    fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
+        self.set_group_effect(zone, effect)
     }
 }

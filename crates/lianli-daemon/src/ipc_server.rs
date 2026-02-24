@@ -226,6 +226,45 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
             IpcResponse::ok(serde_json::json!(null))
         }
 
+        IpcRequest::GetRgbCapabilities => {
+            // TODO: collect from RGB controller
+            IpcResponse::ok(serde_json::json!([]))
+        }
+
+        IpcRequest::SetRgbEffect {
+            device_id,
+            zone,
+            effect,
+        } => {
+            // TODO: forward to RGB controller
+            debug!("SetRgbEffect for {device_id} zone {zone}: {:?}", effect.mode);
+            IpcResponse::ok(serde_json::json!(null))
+        }
+
+        IpcRequest::SetRgbDirect {
+            device_id,
+            zone,
+            colors,
+        } => {
+            // TODO: forward to RGB controller
+            debug!("SetRgbDirect for {device_id} zone {zone}: {} LEDs", colors.len());
+            IpcResponse::ok(serde_json::json!(null))
+        }
+
+        IpcRequest::SetRgbConfig { config } => {
+            let mut state = state.lock();
+            let app_config = state.config.get_or_insert_with(AppConfig::default);
+            app_config.rgb = Some(config);
+            let cfg_clone = app_config.clone();
+            match write_config(&state.config_path, &cfg_clone) {
+                Ok(()) => {
+                    state.config_reload_pending = true;
+                    IpcResponse::ok(serde_json::json!(null))
+                }
+                Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
+            }
+        }
+
         IpcRequest::Subscribe => {
             // TODO: long-lived subscription for events
             IpcResponse::error("Subscribe not yet implemented; use polling via GetTelemetry")
