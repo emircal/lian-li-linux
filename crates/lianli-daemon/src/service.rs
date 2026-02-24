@@ -7,7 +7,7 @@ use anyhow::Result;
 use lianli_devices::crypto::PacketBuilder;
 use lianli_devices::detect::{
     enumerate_devices, enumerate_hid_devices, find_wireless_lcd_devices, open_fan_device,
-    open_rgb_device,
+    open_rgb_devices,
 };
 use lianli_devices::slv3_lcd::Slv3LcdDevice;
 use lianli_devices::traits::FanDevice;
@@ -375,15 +375,19 @@ impl ServiceManager {
         };
 
         for det in enumerate_hid_devices(&api) {
-            if let Some(result) = open_rgb_device(&api, &det) {
-                let device_id = det
-                    .serial
-                    .clone()
-                    .unwrap_or_else(|| format!("hid:{:04x}:{:04x}", det.vid, det.pid));
+            if let Some(result) = open_rgb_devices(&api, &det) {
+                let base_id = det.device_id();
                 match result {
-                    Ok(ctrl) => {
-                        info!("Opened {} as RGB device: {device_id}", det.name);
-                        wired_rgb.insert(device_id, ctrl);
+                    Ok(devices) => {
+                        for (suffix, ctrl) in devices {
+                            let device_id = if suffix.is_empty() {
+                                base_id.clone()
+                            } else {
+                                format!("{base_id}:{suffix}")
+                            };
+                            info!("Opened {} as RGB device: {device_id}", det.name);
+                            wired_rgb.insert(device_id, ctrl);
+                        }
                     }
                     Err(err) => warn!("Failed to init RGB for {}: {err}", det.name),
                 }
@@ -465,10 +469,7 @@ impl ServiceManager {
 
         for det in enumerate_hid_devices(&api) {
             if let Some(result) = open_fan_device(&api, &det) {
-                let base_id = det
-                    .serial
-                    .clone()
-                    .unwrap_or_else(|| format!("hid:{:04x}:{:04x}", det.vid, det.pid));
+                let base_id = det.device_id();
                 match result {
                     Ok(ctrl) => {
                         info!("Opened {} as fan device: {base_id}", det.name);

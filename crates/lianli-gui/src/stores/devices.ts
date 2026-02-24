@@ -14,12 +14,23 @@ export const useDeviceStore = defineStore("devices", () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
 
+  // Callback invoked when daemon connection is first detected (or re-established)
+  let onConnectCallback: (() => void) | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  function onDaemonConnect(cb: () => void) {
+    onConnectCallback = cb;
+  }
 
   async function checkDaemon(): Promise<boolean> {
     try {
+      const wasConnected = daemonConnected.value;
       const connected = await invoke<boolean>("connect_daemon");
       daemonConnected.value = connected;
+      // Fire callback on first connection or reconnection
+      if (connected && !wasConnected && onConnectCallback) {
+        onConnectCallback();
+      }
       return connected;
     } catch {
       daemonConnected.value = false;
@@ -78,5 +89,6 @@ export const useDeviceStore = defineStore("devices", () => {
     refreshTelemetry,
     startPolling,
     stopPolling,
+    onDaemonConnect,
   };
 });

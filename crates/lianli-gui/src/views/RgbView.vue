@@ -100,12 +100,23 @@ function handleApplyToAll(deviceId: string, effect: RgbEffect) {
 
 function handleMbRgbSync(deviceId: string, enabled: boolean) {
   const cfg = { ...rgbConfig.value };
-  let devCfg = cfg.devices.find((d) => d.device_id === deviceId);
-  if (!devCfg) {
-    devCfg = { device_id: deviceId, mb_rgb_sync: enabled, zones: [] };
-    cfg.devices.push(devCfg);
-  } else {
-    devCfg.mb_rgb_sync = enabled;
+
+  // MB sync is controller-wide. Find all sibling port devices from the same controller
+  // (e.g., "Nuvoton:port0" and "Nuvoton:port1" share base "Nuvoton").
+  const baseId = deviceId.replace(/:port\d+$/, "");
+  const siblingIds = capabilities.value
+    .filter((c) => c.device_id.startsWith(baseId + ":port") || c.device_id === deviceId)
+    .map((c) => c.device_id);
+
+  // Update all siblings in config
+  for (const id of siblingIds) {
+    let devCfg = cfg.devices.find((d) => d.device_id === id);
+    if (!devCfg) {
+      devCfg = { device_id: id, mb_rgb_sync: enabled, zones: [] };
+      cfg.devices.push(devCfg);
+    } else {
+      devCfg.mb_rgb_sync = enabled;
+    }
   }
   configStore.updateRgbConfig(cfg);
 

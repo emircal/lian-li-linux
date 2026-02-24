@@ -15,6 +15,7 @@ use anyhow::{bail, Context, Result};
 use hidapi::HidDevice;
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
 use parking_lot::Mutex;
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 const REPORT_ID: u8 = 0x01;
@@ -561,11 +562,31 @@ impl FanDevice for TlFanController {
     }
 }
 
-/// TL Fan LED zones: one zone per active port (port with detected fans).
-/// Each zone covers all fans on that port via SetFanGroupLight.
-impl RgbDevice for TlFanController {
+/// Per-port RGB device for the TL Fan controller.
+///
+/// Each port with detected fans becomes a separate `RgbDevice`.
+/// Zones within the device = individual fans on that port.
+/// Animated effects use SetFanGroupLight (0xB0) for synced animation across the port.
+/// Static/Direct/Off use per-fan SetFanLight (0xA3) for individual color control.
+pub struct TlFanPortDevice {
+    controller: Arc<TlFanController>,
+    port: u8,
+    fan_count: u8,
+}
+
+impl TlFanPortDevice {
+    pub fn new(controller: Arc<TlFanController>, port: u8, fan_count: u8) -> Self {
+        Self {
+            controller,
+            port,
+            fan_count,
+        }
+    }
+}
+
+impl RgbDevice for TlFanPortDevice {
     fn device_name(&self) -> String {
-        "UNI FAN TL Controller".to_string()
+        format!("UNI FAN TL Port {}", self.port)
     }
 
     fn supported_modes(&self) -> Vec<RgbMode> {
@@ -603,48 +624,31 @@ impl RgbDevice for TlFanController {
     }
 
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
-        let guard = self.last_handshake.lock();
-        match guard.as_ref() {
-            Some(hs) => {
-                let mut zones = Vec::new();
-                for (port, &count) in hs.port_fan_counts.iter().enumerate() {
-                    for fan in 0..count {
-                        zones.push(RgbZoneInfo {
-                            name: format!("Port {} Fan {}", port, fan + 1),
-                            led_count: LEDS_PER_FAN,
-                        });
-                    }
-                }
-                zones
-            }
-            None => vec![],
-        }
+        (0..self.fan_count)
+            .map(|fan| RgbZoneInfo {
+                name: format!("Fan {}", fan + 1),
+                led_count: LEDS_PER_FAN,
+            })
+            .collect()
     }
 
     fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
-        // Zone index maps to (port, fan_index) across all active ports
-        let (port, fan_index) = {
-            let guard = self.last_handshake.lock();
-            match guard.as_ref() {
-                Some(hs) => {
-                    let mut idx = zone as usize;
-                    let mut found = None;
-                    for (port, &count) in hs.port_fan_counts.iter().enumerate() {
-                        let count = count as usize;
-                        if idx < count {
-                            found = Some((port as u8, idx as u8));
-                            break;
-                        }
-                        idx -= count;
-                    }
-                    found.ok_or_else(|| anyhow::anyhow!("Zone {zone} out of range"))?
-                }
-                None => bail!("No handshake data available"),
-            }
-        };
+        if zone >= self.fan_count {
+            bail!("Zone {zone} out of range (port {} has {} fans)", self.port, self.fan_count);
+        }
 
-        // Use SetFanLight (0xA3) per-fan for precise control
-        self.set_fan_light(port, fan_index, effect, false)
+        // Animated effects use SetFanGroupLight (0xB0) for synced animation across the port.
+        // Static/Direct/Off use per-fan SetFanLight (0xA3) for individual color control.
+        match effect.mode {
+            RgbMode::Static | RgbMode::Direct | RgbMode::Off => {
+                self.controller.set_fan_light(self.port, zone, effect, false)
+            }
+            _ => {
+                // Group number from setup_fan_groups: (port * 4) * 2
+                let group_number = (self.port as u16 * 4 * 2) as u8;
+                self.controller.set_group_light(group_number, effect)
+            }
+        }
     }
 
     fn supports_mb_rgb_sync(&self) -> bool {
@@ -652,26 +656,48 @@ impl RgbDevice for TlFanController {
     }
 
     fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
-        // From decompiled TLFanDevice.cs: SetFanLight(port, fanIndex, config, isSync, disable)
-        // is called with isSync=true for each fan.
-        // The isSync flag is in data byte 0, bit 0: (port << 4) | isSync
-        // Command: 0xA3 (SetFanLight)
-        let port_fan_counts = {
-            let guard = self.last_handshake.lock();
-            guard
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("No handshake data"))?
-                .port_fan_counts
-        };
+        // MB sync is controller-wide — apply to ALL ports, not just this one.
+        let port_fan_counts = self
+            .controller
+            .last_handshake
+            .lock()
+            .as_ref()
+            .map(|hs| hs.port_fan_counts)
+            .unwrap_or([0; 4]);
 
         let dummy_effect = RgbEffect::default();
         for (port, &fan_count) in port_fan_counts.iter().enumerate() {
             for fan in 0..fan_count {
-                self.set_fan_light(port as u8, fan, &dummy_effect, enabled)?;
+                self.controller.set_fan_light(port as u8, fan, &dummy_effect, enabled)?;
             }
         }
-
-        debug!("Set MB RGB sync: enabled={enabled}");
+        debug!("Set MB RGB sync (all ports): enabled={enabled}");
         Ok(())
+    }
+}
+
+impl TlFanController {
+    /// Create per-port RGB devices from this controller.
+    /// Each active port becomes a separate `RgbDevice`.
+    pub fn into_port_devices(self) -> Vec<(u8, TlFanPortDevice)> {
+        let port_fan_counts = self
+            .last_handshake
+            .lock()
+            .as_ref()
+            .map(|hs| hs.port_fan_counts)
+            .unwrap_or([0; 4]);
+
+        let controller = Arc::new(self);
+        port_fan_counts
+            .iter()
+            .enumerate()
+            .filter(|(_, &count)| count > 0)
+            .map(|(port, &count)| {
+                (
+                    port as u8,
+                    TlFanPortDevice::new(Arc::clone(&controller), port as u8, count),
+                )
+            })
+            .collect()
     }
 }

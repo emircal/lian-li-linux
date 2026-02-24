@@ -621,8 +621,8 @@ impl ClientHandler {
 
         // Add each supported mode from the device
         for rgb_mode in &cap.supported_modes {
-            if matches!(rgb_mode, RgbMode::Off | RgbMode::Direct) {
-                continue; // Skip Off (handled via brightness=0) and Direct (already added)
+            if matches!(rgb_mode, RgbMode::Off | RgbMode::Direct | RgbMode::Static) {
+                continue; // Skip Off (brightness=0), Direct (already added), Static (same as Direct)
             }
 
             let name = rgb_mode.display_name();

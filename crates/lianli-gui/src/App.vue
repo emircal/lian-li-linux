@@ -8,6 +8,12 @@ const deviceStore = useDeviceStore();
 const configStore = useConfigStore();
 
 onMounted(async () => {
+  // Load config whenever daemon connects (or reconnects)
+  deviceStore.onDaemonConnect(async () => {
+    await deviceStore.refreshDevices(true);
+    await configStore.load();
+  });
+
   await deviceStore.checkDaemon();
   if (deviceStore.daemonConnected) {
     await deviceStore.refreshDevices(true);

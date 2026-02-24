@@ -145,14 +145,18 @@ function rgbToHex(color: [number, number, number]): string {
           <button
             v-if="capabilities.supports_mb_rgb_sync"
             @click="emit('mb-rgb-sync', capabilities.device_id, !deviceConfig.mb_rgb_sync)"
-            class="px-2 py-1 text-xs rounded transition-colors"
+            class="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border transition-all cursor-pointer"
             :class="
               deviceConfig.mb_rgb_sync
-                ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600'
+                ? 'bg-green-50 dark:bg-green-900/30 border-green-300 dark:border-green-700 text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900/50'
+                : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
             "
           >
-            MB Sync {{ deviceConfig.mb_rgb_sync ? "On" : "Off" }}
+            <span
+              class="inline-block w-2 h-2 rounded-full"
+              :class="deviceConfig.mb_rgb_sync ? 'bg-green-500' : 'bg-gray-400'"
+            />
+            MB Sync
           </button>
           <button
             v-if="expandedZone !== null"

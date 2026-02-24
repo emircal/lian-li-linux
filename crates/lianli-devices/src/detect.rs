@@ -29,6 +29,28 @@ pub struct DetectedHidDevice {
     pub serial: Option<String>,
 }
 
+/// Known non-unique HID serial strings (chip manufacturer names, not device serials).
+const NON_UNIQUE_SERIALS: &[&str] = &["Nuvoton"];
+
+impl DetectedHidDevice {
+    /// Generate a stable device ID. Uses the serial if it's unique,
+    /// otherwise falls back to VID:PID with a path-derived suffix to
+    /// disambiguate multiple identical controllers.
+    pub fn device_id(&self) -> String {
+        match &self.serial {
+            Some(s) if !NON_UNIQUE_SERIALS.contains(&s.as_str()) => s.clone(),
+            _ => {
+                // Use HID path bytes to create a short disambiguator
+                let path_bytes = self.path.as_bytes();
+                let hash: u32 = path_bytes
+                    .iter()
+                    .fold(0u32, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u32));
+                format!("hid:{:04x}:{:04x}:{:04x}", self.vid, self.pid, hash as u16)
+            }
+        }
+    }
+}
+
 /// Enumerate all Lian Li USB devices on the system.
 pub fn enumerate_devices() -> Result<Vec<DetectedDevice>> {
     let usb_devices = rusb::devices()?;
@@ -110,6 +132,9 @@ pub fn enumerate_hid_devices(api: &HidApi) -> Vec<DetectedHidDevice> {
                 }
             } else {
                 // No usage page filter — deduplicate by vid:pid:serial
+                // to avoid opening the wrong HID interface.
+                // (TL Fan uses usage_page filtering so this branch only
+                // applies to ENE and other devices with unique serials.)
                 let serial_str = dev_info
                     .serial_number()
                     .unwrap_or("")
@@ -193,15 +218,17 @@ pub fn open_fan_device(
     }
 }
 
-/// Open a detected HID device as an RGB controller.
+/// Open a detected HID device as RGB controller(s).
 ///
-/// Returns `None` if the family doesn't support RGB control via HID,
-/// or `Err` if opening/init fails.
+/// Returns a list of `(device_id_suffix, RgbDevice)` pairs.
+/// For TL Fan controllers, each active port becomes a separate device (suffix = "port0", "port1", etc.).
+/// For other devices, a single device is returned with an empty suffix.
+/// Returns `None` if the family doesn't support RGB control via HID.
 /// Opens a separate HID handle so it can coexist with fan control.
-pub fn open_rgb_device(
+pub fn open_rgb_devices(
     api: &HidApi,
     det: &DetectedHidDevice,
-) -> Option<Result<Box<dyn crate::traits::RgbDevice>>> {
+) -> Option<Result<Vec<(String, Box<dyn crate::traits::RgbDevice>)>>> {
     if !det.family.has_rgb() {
         return None;
     }
@@ -212,8 +239,14 @@ pub fn open_rgb_device(
                 Err(e) => return Some(Err(anyhow::anyhow!("HID open for RGB: {e}"))),
             };
             Some(
-                crate::tl_fan::TlFanController::new(hid_dev)
-                    .map(|c| Box::new(c) as Box<dyn crate::traits::RgbDevice>),
+                crate::tl_fan::TlFanController::new(hid_dev).map(|ctrl| {
+                    ctrl.into_port_devices()
+                        .into_iter()
+                        .map(|(port, dev)| {
+                            (format!("port{port}"), Box::new(dev) as Box<dyn crate::traits::RgbDevice>)
+                        })
+                        .collect()
+                }),
             )
         }
         DeviceFamily::Ene6k77 => {
@@ -223,7 +256,7 @@ pub fn open_rgb_device(
             };
             Some(
                 crate::ene6k77::Ene6k77Controller::new(hid_dev, det.pid)
-                    .map(|c| Box::new(c) as Box<dyn crate::traits::RgbDevice>),
+                    .map(|c| vec![(String::new(), Box::new(c) as Box<dyn crate::traits::RgbDevice>)]),
             )
         }
         DeviceFamily::Galahad2Trinity => {
@@ -233,7 +266,7 @@ pub fn open_rgb_device(
             };
             Some(
                 crate::galahad2_trinity::Galahad2TrinityController::new(hid_dev, det.pid)
-                    .map(|c| Box::new(c) as Box<dyn crate::traits::RgbDevice>),
+                    .map(|c| vec![(String::new(), Box::new(c) as Box<dyn crate::traits::RgbDevice>)]),
             )
         }
         _ => None,

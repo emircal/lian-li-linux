@@ -263,17 +263,12 @@ impl DeviceFamily {
     }
 
     pub fn has_rgb(self) -> bool {
+        // Only wired HID devices that do RGB directly.
+        // Wireless fans (Slv3, Tlv2, SlInf, Clv1) control RGB via the RF dongle,
+        // not their USB connection — they get has_rgb from the wireless device entry.
         matches!(
             self,
-            Self::Ene6k77
-                | Self::TlFan
-                | Self::Galahad2Trinity
-                | Self::Slv3Led
-                | Self::Slv3Lcd
-                | Self::Tlv2Lcd
-                | Self::Tlv2Led
-                | Self::SlInf
-                | Self::Clv1
+            Self::Ene6k77 | Self::TlFan | Self::Galahad2Trinity
         )
     }
 }
