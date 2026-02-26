@@ -21,8 +21,8 @@
 | UNI FAN TL Controller | 4 ports | Yes | - | - |
 | UNI FAN TL LCD | 4 ports | Yes | 400x400 | - |
 | Galahad II Trinity AIO | Yes | Yes | - | Yes |
-| HydroShift LCD AIO | Yes | - | 480x480 | Yes |
-| Galahad II LCD / Vision AIO | Yes | - | 480x480 | Yes |
+| HydroShift LCD AIO | Yes | Yes | 480x480 | Yes |
+| Galahad II LCD / Vision AIO | Yes | Yes | 480x480 | Yes |
 
 ### Wireless (USB Bulk via TX/RX dongle)
 
