@@ -162,8 +162,10 @@ fn handle_request(request: IpcRequest, state: &Arc<Mutex<DaemonState>>) -> IpcRe
 
         IpcRequest::GetConfig => {
             let state = state.lock();
-            let config = state.config.clone().unwrap_or_default();
-            IpcResponse::ok(&config)
+            match &state.config {
+                Some(config) => IpcResponse::ok(config),
+                None => IpcResponse::error("config not loaded yet"),
+            }
         }
 
         IpcRequest::GetTelemetry => {

@@ -119,14 +119,15 @@ impl ServiceManager {
             }
         }
 
+        // Load config before IPC starts — prevents GUI from getting empty defaults
+        self.load_config();
+        self.sync_ipc_state();
+
         // Start IPC server
         self.ipc_thread = Some(ipc_server::start_ipc_server(
             Arc::clone(&self.ipc_state),
             Arc::clone(&self.ipc_stop),
         ));
-
-        self.load_config();
-        self.sync_ipc_state();
         self.try_wireless();
         self.open_wired_fan_devices();
         self.init_rgb_controller();
