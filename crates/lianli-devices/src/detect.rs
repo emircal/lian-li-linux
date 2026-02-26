@@ -269,6 +269,16 @@ pub fn open_rgb_devices(
                     .map(|c| vec![(String::new(), Box::new(c) as Box<dyn crate::traits::RgbDevice>)]),
             )
         }
+        DeviceFamily::HydroShiftLcd | DeviceFamily::Galahad2Lcd => {
+            let hid_dev = match api.open_path(&det.path) {
+                Ok(d) => d,
+                Err(e) => return Some(Err(anyhow::anyhow!("HID open for RGB: {e}"))),
+            };
+            Some(
+                crate::hydroshift_lcd::AioLcdRgbController::new(hid_dev, det.pid)
+                    .map(|c| vec![(String::new(), Box::new(c) as Box<dyn crate::traits::RgbDevice>)]),
+            )
+        }
         _ => None,
     }
 }

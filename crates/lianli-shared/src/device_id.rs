@@ -268,7 +268,11 @@ impl DeviceFamily {
         // not their USB connection — they get has_rgb from the wireless device entry.
         matches!(
             self,
-            Self::Ene6k77 | Self::TlFan | Self::Galahad2Trinity
+            Self::Ene6k77
+                | Self::TlFan
+                | Self::Galahad2Trinity
+                | Self::HydroShiftLcd
+                | Self::Galahad2Lcd
         )
     }
 }

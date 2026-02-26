@@ -12,9 +12,10 @@
 //! LCD: 480x480 pixels, 24fps. Pump/fan PWM: 0-100%.
 //! Coolant temperature sensor available.
 
-use crate::traits::{AioDevice, FanDevice, LcdDevice};
+use crate::traits::{AioDevice, FanDevice, LcdDevice, RgbDevice};
 use anyhow::{bail, Context, Result};
 use hidapi::HidDevice;
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use lianli_shared::screen::ScreenInfo;
 use parking_lot::Mutex;
 use tracing::{debug, info, warn};
@@ -78,6 +79,12 @@ impl AioLcdVariant {
             Self::Galahad2Lcd => "Galahad II LCD",
             Self::Galahad2Vision => "Galahad II Vision",
         }
+    }
+
+    /// Whether this variant has pump head RGB (SetPumpLighting 0x83).
+    /// Galahad2 LCD + Vision have pump RGB; HydroShift variants do not.
+    pub fn has_pump_rgb(&self) -> bool {
+        matches!(self, Self::Galahad2Lcd | Self::Galahad2Vision)
     }
 }
 
@@ -454,4 +461,174 @@ fn build_b_packet(cmd: u8, total_data_size: u32, packet_num: u32, payload: &[u8]
     }
 
     pkt
+}
+
+// ── AIO LCD RGB controller ─────────────────────────────────────────────────
+//
+// Lightweight RGB-only controller for AIO LCD devices.
+// Uses a separate HID handle from the LCD/PWM controller so both can coexist.
+// Commands are identical to Galahad2 Trinity (SetPumpLighting 0x83, SetFanLighting 0x85).
+
+const CMD_SET_PUMP_LIGHT: u8 = 0x83;
+const CMD_SET_FAN_LIGHT: u8 = 0x85;
+const FAN_LED_COUNT: u16 = 24;
+
+pub struct AioLcdRgbController {
+    device: Mutex<HidDevice>,
+    variant: AioLcdVariant,
+}
+
+impl AioLcdRgbController {
+    pub fn new(device: HidDevice, pid: u16) -> Result<Self> {
+        let variant = AioLcdVariant::from_pid(pid)
+            .ok_or_else(|| anyhow::anyhow!("Unknown AIO LCD PID: {pid:#06x}"))?;
+        info!("Opened {} RGB controller", variant.name());
+        Ok(Self {
+            device: Mutex::new(device),
+            variant,
+        })
+    }
+
+    fn set_pump_light(&self, effect: &RgbEffect, source_mcu: bool) -> Result<()> {
+        let scope = match effect.scope {
+            RgbScope::Inner => 0u8,
+            RgbScope::Outer => 1,
+            _ => 2,
+        };
+        let mode_byte = effect.mode.to_tl_mode_byte().unwrap_or(3);
+        let mut payload = [0u8; 19];
+        payload[0] = scope;
+        payload[1] = mode_byte;
+        payload[2] = effect.brightness.min(4);
+        payload[3] = effect.speed.min(4);
+        for (i, color) in effect.colors.iter().take(4).enumerate() {
+            let offset = 4 + i * 3;
+            payload[offset] = color[0];
+            payload[offset + 1] = color[1];
+            payload[offset + 2] = color[2];
+        }
+        payload[16] = effect.direction.to_tl_byte();
+        payload[17] = if effect.mode == RgbMode::Off { 1 } else { 0 };
+        payload[18] = if source_mcu { 0 } else { 1 };
+        self.send_rgb_command(CMD_SET_PUMP_LIGHT, &payload)?;
+        debug!("Set pump light: mode={mode_byte} scope={scope}");
+        Ok(())
+    }
+
+    fn set_fan_light(&self, effect: &RgbEffect, source_mcu: bool, sync_to_pump: bool) -> Result<()> {
+        let mode_byte = effect.mode.to_tl_mode_byte().unwrap_or(3);
+        let mut payload = [0u8; 20];
+        payload[0] = mode_byte;
+        payload[1] = effect.brightness.min(4);
+        payload[2] = effect.speed.min(4);
+        for (i, color) in effect.colors.iter().take(4).enumerate() {
+            let offset = 3 + i * 3;
+            payload[offset] = color[0];
+            payload[offset + 1] = color[1];
+            payload[offset + 2] = color[2];
+        }
+        payload[15] = effect.direction.to_tl_byte();
+        payload[16] = if effect.mode == RgbMode::Off { 1 } else { 0 };
+        payload[17] = if source_mcu { 0 } else { 1 };
+        payload[18] = sync_to_pump as u8;
+        payload[19] = FAN_LED_COUNT as u8;
+        self.send_rgb_command(CMD_SET_FAN_LIGHT, &payload)?;
+        debug!("Set fan light: mode={mode_byte} sync_to_pump={sync_to_pump}");
+        Ok(())
+    }
+
+    fn send_rgb_command(&self, cmd: u8, data: &[u8]) -> Result<Vec<u8>> {
+        let mut pkt = [0u8; A_PACKET_SIZE];
+        pkt[0] = REPORT_ID_A;
+        pkt[1] = cmd;
+        pkt[5] = data.len() as u8;
+        let copy_len = data.len().min(58);
+        pkt[A_HEADER_LEN..A_HEADER_LEN + copy_len].copy_from_slice(&data[..copy_len]);
+
+        let dev = self.device.lock();
+        dev.write(&pkt).context("AIO LCD RGB: write")?;
+
+        let mut buf = [0u8; A_PACKET_SIZE];
+        let n = dev
+            .read_timeout(&mut buf, READ_TIMEOUT_MS)
+            .context("AIO LCD RGB: read")?;
+        if n == 0 {
+            bail!("AIO LCD RGB: no response to {cmd:#04x}");
+        }
+        Ok(buf[..n].to_vec())
+    }
+}
+
+impl RgbDevice for AioLcdRgbController {
+    fn device_name(&self) -> String {
+        format!("{} AIO", self.variant.name())
+    }
+
+    fn supported_modes(&self) -> Vec<RgbMode> {
+        vec![
+            RgbMode::Off,
+            RgbMode::Static,
+            RgbMode::Rainbow,
+            RgbMode::RainbowMorph,
+            RgbMode::Breathing,
+            RgbMode::Runway,
+            RgbMode::Meteor,
+            RgbMode::ColorCycle,
+            RgbMode::Staggered,
+            RgbMode::Tide,
+            RgbMode::Mixing,
+            RgbMode::Ripple,
+            RgbMode::Reflect,
+            RgbMode::TailChasing,
+            RgbMode::Paint,
+            RgbMode::PingPong,
+            RgbMode::BigBang,
+            RgbMode::Vortex,
+            RgbMode::Pump,
+            RgbMode::ColorsMorph,
+        ]
+    }
+
+    fn zone_info(&self) -> Vec<RgbZoneInfo> {
+        if self.variant.has_pump_rgb() {
+            vec![
+                RgbZoneInfo { name: "Pump Head".to_string(), led_count: 24 },
+                RgbZoneInfo { name: "Fans".to_string(), led_count: FAN_LED_COUNT },
+            ]
+        } else {
+            vec![
+                RgbZoneInfo { name: "Fans".to_string(), led_count: FAN_LED_COUNT },
+            ]
+        }
+    }
+
+    fn set_zone_effect(&self, zone: u8, effect: &RgbEffect) -> Result<()> {
+        if self.variant.has_pump_rgb() {
+            match zone {
+                0 => self.set_pump_light(effect, true),
+                1 => self.set_fan_light(effect, true, false),
+                _ => bail!("{}: zone {zone} out of range (0-1)", self.variant.name()),
+            }
+        } else {
+            match zone {
+                0 => self.set_fan_light(effect, true, false),
+                _ => bail!("{}: zone {zone} out of range (0)", self.variant.name()),
+            }
+        }
+    }
+
+    fn supports_mb_rgb_sync(&self) -> bool {
+        true
+    }
+
+    fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
+        let source_mcu = !enabled;
+        let dummy = RgbEffect::default();
+        if self.variant.has_pump_rgb() {
+            self.set_pump_light(&dummy, source_mcu)?;
+        }
+        self.set_fan_light(&dummy, source_mcu, false)?;
+        debug!("Set MB RGB sync: enabled={enabled}");
+        Ok(())
+    }
 }
