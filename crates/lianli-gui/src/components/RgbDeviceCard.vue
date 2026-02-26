@@ -6,6 +6,7 @@ import type {
   RgbEffect,
   RgbMode,
   RgbDirection,
+  RgbScope,
 } from "../types";
 import { RGB_MODE_NAMES } from "../types";
 
@@ -103,6 +104,15 @@ function updateBrightness(zoneIndex: number, brightness: number) {
 function updateDirection(zoneIndex: number, direction: RgbDirection) {
   const effect = { ...effectFor(zoneIndex), direction };
   emit("zone-update", props.capabilities.device_id, zoneIndex, effect);
+}
+
+function updateScope(zoneIndex: number, scope: RgbScope) {
+  const effect = { ...effectFor(zoneIndex), scope };
+  emit("zone-update", props.capabilities.device_id, zoneIndex, effect);
+}
+
+function scopesForZone(zoneIndex: number): RgbScope[] {
+  return props.capabilities.supported_scopes?.[zoneIndex] ?? [];
 }
 
 function applyToAll() {
@@ -313,6 +323,28 @@ function rgbToHex(color: [number, number, number]): string {
                 "
               >
                 {{ dir.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Scope (Top/Bottom for TL fans, Inner/Outer for pump heads) -->
+          <div v-if="scopesForZone(idx).length > 1 && effectFor(idx).mode !== 'Off'">
+            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+              Scope
+            </label>
+            <div class="flex gap-1 flex-wrap">
+              <button
+                v-for="s in scopesForZone(idx)"
+                :key="s"
+                @click="updateScope(idx, s)"
+                class="px-2 py-1 text-xs rounded transition-colors"
+                :class="
+                  effectFor(idx).scope === s
+                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600'
+                "
+              >
+                {{ s }}
               </button>
             </div>
           </div>

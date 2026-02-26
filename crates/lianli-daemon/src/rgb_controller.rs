@@ -227,6 +227,7 @@ impl RgbController {
                 supports_direct: dev.supports_direct(),
                 supports_mb_rgb_sync: dev.supports_mb_rgb_sync(),
                 total_led_count: dev.total_led_count(),
+                supported_scopes: dev.supported_scopes(),
             });
         }
 
@@ -249,6 +250,7 @@ impl RgbController {
                 supports_direct: true,
                 supports_mb_rgb_sync: false,
                 total_led_count: total_leds,
+                supported_scopes: vec![],
             });
         }
 

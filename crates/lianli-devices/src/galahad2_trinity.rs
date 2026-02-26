@@ -364,14 +364,18 @@ impl RgbDevice for Galahad2TrinityController {
         }
     }
 
+    fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
+        vec![
+            vec![RgbScope::All, RgbScope::Inner, RgbScope::Outer], // Pump Head
+            vec![],                                                 // Fans (All only)
+        ]
+    }
+
     fn supports_mb_rgb_sync(&self) -> bool {
         true
     }
 
     fn set_mb_rgb_sync(&self, enabled: bool) -> Result<()> {
-        // From decompiled Galahad2TrinityDevice.cs:
-        // Pump: byte[18] = ARGBSignalSource (0=MCU, 1=Motherboard)
-        // Fan:  byte[17] = ARGBSignalSource (0=MCU, 1=Motherboard)
         let source_mcu = !enabled;
         let dummy = RgbEffect::default();
         self.set_pump_light(&dummy, source_mcu)?;

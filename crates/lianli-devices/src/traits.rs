@@ -1,5 +1,5 @@
 use anyhow::Result;
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use lianli_shared::screen::ScreenInfo;
 
 /// A device that can control fan speeds.
@@ -100,6 +100,11 @@ pub trait RgbDevice: Send + Sync {
     /// When false, `set_direct_colors` maps to Static mode with the first color.
     fn supports_direct(&self) -> bool {
         false
+    }
+
+    /// Supported scopes per zone. Return empty vec for zones with only "All".
+    fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
+        vec![]
     }
 
     /// Whether this device supports motherboard ARGB sync (passthrough from MB header).

@@ -323,4 +323,6 @@ pub struct RgbDeviceCapabilities {
     pub supports_mb_rgb_sync: bool,
     /// Total number of LEDs across all zones.
     pub total_led_count: u16,
+    /// Supported scopes per zone. Empty vec = only "All" (no selector shown).
+    pub supported_scopes: Vec<Vec<RgbScope>>,
 }

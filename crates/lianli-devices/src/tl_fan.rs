@@ -13,7 +13,7 @@
 use crate::traits::{FanDevice, RgbDevice};
 use anyhow::{bail, Context, Result};
 use hidapi::HidDevice;
-use lianli_shared::rgb::{RgbEffect, RgbMode, RgbZoneInfo};
+use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -644,11 +644,27 @@ impl RgbDevice for TlFanPortDevice {
                 self.controller.set_fan_light(self.port, zone, effect, false)
             }
             _ => {
-                // Group number from setup_fan_groups: (port * 4) * 2
-                let group_number = (self.port as u16 * 4 * 2) as u8;
-                self.controller.set_group_light(group_number, effect)
+                // Group number: (port * 4 + groupIndex) * 2 + bottomSide
+                // Top = base, Bottom = base + 1, All = send to both
+                let base_group = (self.port as u16 * 4 * 2) as u8;
+                match effect.scope {
+                    RgbScope::Bottom => {
+                        self.controller.set_group_light(base_group + 1, effect)
+                    }
+                    RgbScope::Top => {
+                        self.controller.set_group_light(base_group, effect)
+                    }
+                    _ => {
+                        self.controller.set_group_light(base_group, effect)?;
+                        self.controller.set_group_light(base_group + 1, effect)
+                    }
+                }
             }
         }
+    }
+
+    fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
+        vec![vec![RgbScope::All, RgbScope::Top, RgbScope::Bottom]; self.fan_count as usize]
     }
 
     fn supports_mb_rgb_sync(&self) -> bool {

@@ -617,6 +617,17 @@ impl RgbDevice for AioLcdRgbController {
         }
     }
 
+    fn supported_scopes(&self) -> Vec<Vec<RgbScope>> {
+        if self.variant.has_pump_rgb() {
+            vec![
+                vec![RgbScope::All, RgbScope::Inner, RgbScope::Outer], // Pump Head
+                vec![],                                                 // Fans
+            ]
+        } else {
+            vec![]
+        }
+    }
+
     fn supports_mb_rgb_sync(&self) -> bool {
         true
     }
