@@ -1,0 +1,144 @@
+import { Theme } from "../theme.slint";
+import { Badge, Card } from "../widgets.slint";
+import { PageHeader } from "../page_header.slint";
+import { Button, ScrollView } from "std-widgets.slint";
+
+export struct DeviceData {
+    device-id: string,
+    family-name: string,
+    name: string,
+    serial: string,
+    has-lcd: bool,
+    has-fan: bool,
+    has-pump: bool,
+    has-rgb: bool,
+    fan-rpms: string,
+    coolant-temp: string,
+    resolution: string,
+}
+
+component DeviceCard inherits Card {
+    in property <DeviceData> device;
+
+    width: 280px;
+
+    VerticalLayout {
+        spacing: 6px;
+
+        // Header
+        Text {
+            text: device.name;
+            font-size: 14px;
+            font-weight: 600;
+            color: Theme.text-primary;
+            overflow: elide;
+        }
+
+        Text {
+            text: device.family-name;
+            font-size: 11px;
+            color: Theme.text-secondary;
+        }
+
+        // Badges
+        HorizontalLayout {
+            spacing: 4px;
+
+            if device.has-lcd: Badge { label: "LCD"; badge-color: Theme.badge-lcd; }
+            if device.has-fan: Badge { label: "Fan"; badge-color: Theme.badge-fan; }
+            if device.has-pump: Badge { label: "Pump"; badge-color: Theme.badge-pump; }
+            if device.has-rgb: Badge { label: "RGB"; badge-color: Theme.badge-rgb; }
+        }
+
+        // Details
+        if device.serial != "": Text {
+            text: "S/N: \{device.serial}";
+            font-size: 11px;
+            color: Theme.text-secondary;
+        }
+
+        if device.resolution != "": Text {
+            text: "Screen: \{device.resolution}";
+            font-size: 11px;
+            color: Theme.text-secondary;
+        }
+
+        // Live telemetry
+        if device.fan-rpms != "": Text {
+            text: "Fan RPM: \{device.fan-rpms}";
+            font-size: 11px;
+            color: Theme.text-primary;
+        }
+
+        if device.coolant-temp != "": Text {
+            text: "Coolant: \{device.coolant-temp}";
+            font-size: 11px;
+            color: Theme.text-primary;
+        }
+    }
+}
+
+export component DevicesPage inherits VerticalLayout {
+    in property <[DeviceData]> devices: [];
+    in property <bool> streaming-active: false;
+    callback refresh();
+
+    PageHeader {
+        title: "Devices";
+
+        HorizontalLayout {
+            alignment: end;
+            vertical-stretch: 0;
+
+            Button {
+                text: "Refresh";
+                clicked => { root.refresh(); }
+            }
+        }
+    }
+
+    ScrollView {
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+
+            // Device grid with wrapping
+            FlexBoxLayout {
+                spacing-horizontal: 12px;
+                spacing-vertical: 12px;
+                align-items: start;
+
+                for device[idx] in root.devices: DeviceCard {
+                    device: device;
+                }
+            }
+
+            if root.devices.length == 0: Text {
+                text: "No devices found. Is the daemon running?";
+                font-size: 14px;
+                color: Theme.text-secondary;
+                horizontal-alignment: center;
+            }
+
+            if root.streaming-active: HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: Theme.status-ok;
+                    }
+                }
+                Text {
+                    text: "LCD streaming active";
+                    font-size: 12px;
+                    color: Theme.status-ok;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

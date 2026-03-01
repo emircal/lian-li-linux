@@ -1,0 +1,409 @@
+import { Theme } from "../theme.slint";
+import { Card } from "../widgets.slint";
+import { PageHeader } from "../page_header.slint";
+import { Button, ScrollView, ComboBox, LineEdit, SpinBox } from "std-widgets.slint";
+
+export struct LcdDeviceOption {
+    label: string,
+    serial: string,
+}
+
+export struct LcdEntryData {
+    serial: string,
+    media-type: string,
+    path: string,
+    fps: int,
+    orientation: int,
+    rgb-r: int,
+    rgb-g: int,
+    rgb-b: int,
+    // Sensor fields
+    sensor-label: string,
+    sensor-unit: string,
+    sensor-command: string,
+    sensor-font-path: string,
+    sensor-decimal-places: int,
+    sensor-update-interval: int,
+    sensor-value-font-size: int,
+    sensor-unit-font-size: int,
+    sensor-label-font-size: int,
+    sensor-start-angle: int,
+    sensor-sweep-angle: int,
+    sensor-outer-radius: int,
+    sensor-thickness: int,
+    sensor-corner-radius: int,
+    sensor-value-offset: int,
+    sensor-unit-offset: int,
+    sensor-label-offset: int,
+}
+
+component OrientationButton inherits Rectangle {
+    in property <int> degrees;
+    in property <bool> active: false;
+    callback clicked();
+
+    width: 40px;
+    height: 28px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: active ? Theme.accent : Theme.border;
+    background: active ? Theme.accent : transparent;
+
+    TouchArea { clicked => { root.clicked(); } }
+
+    Text {
+        text: "\{root.degrees}\u{00B0}";
+        font-size: 12px;
+        color: active ? Theme.accent-text : Theme.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component LcdConfigCard inherits Card {
+    in property <int> index;
+    in property <LcdEntryData> lcd;
+    in property <[string]> media-types: ["Image", "Video", "GIF", "Solid Color", "Sensor Gauge"];
+    in property <[string]> device-options: [];
+
+    callback remove(int);
+    callback update-field(int, string, string);
+    callback pick-file(int);
+
+    VerticalLayout {
+        spacing: 12px;
+
+        // Header with remove button
+        HorizontalLayout {
+            Text {
+                text: "LCD \{root.index + 1}";
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: "Remove";
+                clicked => { root.remove(root.index); }
+            }
+        }
+
+        // Device selection
+        VerticalLayout {
+            spacing: 4px;
+            Text { text: "Device"; font-size: 12px; color: Theme.text-secondary; }
+            ComboBox {
+                model: root.device-options;
+                current-value: root.lcd.serial;
+                selected(val) => { root.update-field(root.index, "serial", val); }
+            }
+        }
+
+        // Media type
+        VerticalLayout {
+            spacing: 4px;
+            Text { text: "Media Type"; font-size: 12px; color: Theme.text-secondary; }
+            ComboBox {
+                model: root.media-types;
+                current-value: root.lcd.media-type;
+                selected(val) => { root.update-field(root.index, "media_type", val); }
+            }
+        }
+
+        // File path (image/video/gif)
+        if root.lcd.media-type == "Image" || root.lcd.media-type == "Video" || root.lcd.media-type == "GIF": VerticalLayout {
+            spacing: 4px;
+            Text { text: "File Path"; font-size: 12px; color: Theme.text-secondary; }
+            HorizontalLayout {
+                spacing: 8px;
+                LineEdit {
+                    horizontal-stretch: 1;
+                    text: root.lcd.path;
+                    placeholder-text: "/path/to/media";
+                    edited(val) => { root.update-field(root.index, "path", val); }
+                }
+                Button {
+                    text: "Browse";
+                    clicked => { root.pick-file(root.index); }
+                }
+            }
+        }
+
+        // Color (solid color mode)
+        if root.lcd.media-type == "Solid Color": HorizontalLayout {
+            spacing: 8px;
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: "R"; font-size: 12px; color: Theme.text-secondary; }
+                SpinBox { value: root.lcd.rgb-r; minimum: 0; maximum: 255; }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: "G"; font-size: 12px; color: Theme.text-secondary; }
+                SpinBox { value: root.lcd.rgb-g; minimum: 0; maximum: 255; }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: "B"; font-size: 12px; color: Theme.text-secondary; }
+                SpinBox { value: root.lcd.rgb-b; minimum: 0; maximum: 255; }
+            }
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 4px;
+                y: 16px;
+                background: Colors.rgb(root.lcd.rgb-r, root.lcd.rgb-g, root.lcd.rgb-b);
+                border-width: 1px;
+                border-color: Theme.border;
+            }
+        }
+
+        // Sensor configuration
+        if root.lcd.media-type == "Sensor Gauge": VerticalLayout {
+            spacing: 8px;
+            padding: 12px;
+
+            Text {
+                text: "Sensor Configuration";
+                font-size: 13px;
+                font-weight: 600;
+                color: Theme.text-secondary;
+            }
+
+            // Label / Unit / Decimals
+            HorizontalLayout {
+                spacing: 8px;
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Text { text: "Label"; font-size: 11px; color: Theme.text-secondary; }
+                    LineEdit {
+                        text: root.lcd.sensor-label;
+                        edited(val) => { root.update-field(root.index, "sensor_label", val); }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Unit"; font-size: 11px; color: Theme.text-secondary; }
+                    LineEdit {
+                        text: root.lcd.sensor-unit;
+                        edited(val) => { root.update-field(root.index, "sensor_unit", val); }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Decimals"; font-size: 11px; color: Theme.text-secondary; }
+                    SpinBox {
+                        value: root.lcd.sensor-decimal-places;
+                        minimum: 0;
+                        maximum: 3;
+                    }
+                }
+            }
+
+            // Source command
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: "Source Command"; font-size: 11px; color: Theme.text-secondary; }
+                LineEdit {
+                    text: root.lcd.sensor-command;
+                    placeholder-text: "sensors | awk ...";
+                    edited(val) => { root.update-field(root.index, "sensor_command", val); }
+                }
+            }
+
+            // Font path
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: "Font Path"; font-size: 11px; color: Theme.text-secondary; }
+                LineEdit {
+                    text: root.lcd.sensor-font-path;
+                    placeholder-text: "/usr/share/fonts/...";
+                    edited(val) => { root.update-field(root.index, "sensor_font_path", val); }
+                }
+            }
+
+            // Font sizes
+            HorizontalLayout {
+                spacing: 8px;
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Value Size"; font-size: 11px; color: Theme.text-secondary; }
+                    SpinBox { value: root.lcd.sensor-value-font-size; minimum: 1; maximum: 999; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Unit Size"; font-size: 11px; color: Theme.text-secondary; }
+                    SpinBox { value: root.lcd.sensor-unit-font-size; minimum: 1; maximum: 999; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Label Size"; font-size: 11px; color: Theme.text-secondary; }
+                    SpinBox { value: root.lcd.sensor-label-font-size; minimum: 1; maximum: 999; }
+                }
+            }
+
+            // Gauge geometry
+            Text {
+                text: "Gauge Geometry";
+                font-size: 11px;
+                font-weight: 600;
+                color: Theme.text-secondary;
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Start Angle"; font-size: 11px; color: Theme.text-secondary; }
+                    SpinBox { value: root.lcd.sensor-start-angle; minimum: 0; maximum: 360; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Sweep Angle"; font-size: 11px; color: Theme.text-secondary; }
+                    SpinBox { value: root.lcd.sensor-sweep-angle; minimum: 1; maximum: 360; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Radius"; font-size: 11px; color: Theme.text-secondary; }
+                    SpinBox { value: root.lcd.sensor-outer-radius; minimum: 10; maximum: 500; }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Thickness"; font-size: 11px; color: Theme.text-secondary; }
+                    SpinBox { value: root.lcd.sensor-thickness; minimum: 1; maximum: 200; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Corner R"; font-size: 11px; color: Theme.text-secondary; }
+                    SpinBox { value: root.lcd.sensor-corner-radius; minimum: 0; maximum: 100; }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Update (ms)"; font-size: 11px; color: Theme.text-secondary; }
+                    SpinBox { value: root.lcd.sensor-update-interval; minimum: 100; maximum: 10000; }
+                }
+            }
+        }
+
+        // FPS and Orientation
+        HorizontalLayout {
+            spacing: 16px;
+
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: "FPS"; font-size: 12px; color: Theme.text-secondary; }
+                SpinBox {
+                    value: root.lcd.fps;
+                    minimum: 1;
+                    maximum: 60;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: "Orientation"; font-size: 12px; color: Theme.text-secondary; }
+                HorizontalLayout {
+                    spacing: 4px;
+                    OrientationButton {
+                        degrees: 0;
+                        active: root.lcd.orientation == 0;
+                        clicked => { root.update-field(root.index, "orientation", "0"); }
+                    }
+                    OrientationButton {
+                        degrees: 90;
+                        active: root.lcd.orientation == 90;
+                        clicked => { root.update-field(root.index, "orientation", "90"); }
+                    }
+                    OrientationButton {
+                        degrees: 180;
+                        active: root.lcd.orientation == 180;
+                        clicked => { root.update-field(root.index, "orientation", "180"); }
+                    }
+                    OrientationButton {
+                        degrees: 270;
+                        active: root.lcd.orientation == 270;
+                        clicked => { root.update-field(root.index, "orientation", "270"); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component LcdPage inherits VerticalLayout {
+    in property <[LcdEntryData]> lcd-entries: [];
+    in property <[string]> device-options: [];
+    in property <bool> has-config: false;
+
+    callback add-lcd();
+    callback remove-lcd(int);
+    callback update-lcd-field(int, string, string);
+    callback pick-lcd-file(int);
+    callback save-config();
+
+    PageHeader {
+        title: "LCD";
+
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            vertical-stretch: 0;
+
+            Button {
+                text: "+ Add LCD";
+                clicked => { root.add-lcd(); }
+            }
+            Button {
+                text: "Save";
+                clicked => { root.save-config(); }
+            }
+        }
+    }
+
+    ScrollView {
+        VerticalLayout {
+            padding: 24px;
+            spacing: 12px;
+
+            if !root.has-config: Text {
+                text: "No config loaded. Is the daemon running?";
+                font-size: 14px;
+                color: Theme.text-secondary;
+            }
+
+            if root.has-config && root.lcd-entries.length == 0: VerticalLayout {
+                spacing: 12px;
+                padding-top: 48px;
+                alignment: center;
+                Text {
+                    text: "No LCD entries configured.";
+                    font-size: 14px;
+                    color: Theme.text-secondary;
+                    horizontal-alignment: center;
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    Button {
+                        text: "Add LCD Device";
+                        clicked => { root.add-lcd(); }
+                    }
+                }
+            }
+
+            for lcd-entry[idx] in root.lcd-entries: LcdConfigCard {
+                index: idx;
+                lcd: lcd-entry;
+                device-options: root.device-options;
+                remove(i) => { root.remove-lcd(i); }
+                update-field(i, field, val) => { root.update-lcd-field(i, field, val); }
+                pick-file(i) => { root.pick-lcd-file(i); }
+            }
+        }
+    }
+}

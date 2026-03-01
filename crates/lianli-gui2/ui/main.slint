@@ -1,0 +1,176 @@
+import { Theme } from "theme.slint";
+import { Sidebar } from "sidebar.slint";
+import { DevicesPage, DeviceData } from "pages/devices.slint";
+import { FansPage, FanCurveData, FanGroupData, FanSpeedSlot, CurvePoint, LineSegment } from "pages/fans.slint";
+import { LcdPage, LcdEntryData, LcdDeviceOption } from "pages/lcd.slint";
+import { RgbPage, RgbDeviceData, RgbZoneData, RgbColorData } from "pages/rgb.slint";
+import { SettingsPage } from "pages/settings.slint";
+
+export { DeviceData, FanCurveData, FanGroupData, FanSpeedSlot, CurvePoint, LineSegment }
+export { LcdEntryData, LcdDeviceOption }
+export { RgbDeviceData, RgbZoneData, RgbColorData }
+
+export component MainWindow inherits Window {
+    title: "Lian Li Linux";
+    preferred-width: 960px;
+    preferred-height: 640px;
+    min-width: 800px;
+    min-height: 500px;
+
+    // State properties bound from Rust
+    in-out property <int> current-page: 0;
+    in property <bool> daemon-connected: false;
+    in property <bool> config-dirty: false;
+    in property <int> device-count: 0;
+    in property <bool> streaming-active: false;
+    in property <string> socket-path: "";
+    in property <[DeviceData]> devices: [];
+
+    // Settings properties
+    in property <int> lcd-count: 0;
+    in property <int> fan-curve-count: 0;
+    in property <int> default-fps: 30;
+    in property <bool> openrgb-enabled: false;
+    in property <bool> openrgb-running: false;
+    in property <int> openrgb-port: 6743;
+    in property <string> openrgb-error: "";
+
+    // LCD properties
+    in property <[LcdEntryData]> lcd-entries: [];
+    in property <[string]> lcd-device-options: [];
+    in property <bool> has-config: false;
+
+    // RGB properties
+    in property <[RgbDeviceData]> rgb-devices: [];
+
+    // Fan properties
+    in property <[FanCurveData]> fan-curves: [];
+    in property <[FanGroupData]> fan-groups: [];
+    in property <[string]> curve-names: [];
+    in property <[string]> fan-speed-options: [];
+    in property <int> fan-update-interval: 1000;
+
+    // Callbacks for Rust backend
+    callback refresh-devices();
+    callback save-config();
+    callback toggle-openrgb(bool);
+
+    // LCD callbacks
+    callback add-lcd();
+    callback remove-lcd(int);
+    callback update-lcd-field(int, string, string);
+    callback pick-lcd-file(int);
+
+    // RGB callbacks
+    callback rgb-set-mode(string, int, string);
+    callback rgb-set-speed(string, int, int);
+    callback rgb-set-brightness(string, int, int);
+    callback rgb-set-direction(string, int, string);
+    callback rgb-set-scope(string, int, string);
+    callback rgb-set-color(string, int, int, int, int, int);
+    callback rgb-toggle-mb-sync(string, bool);
+    callback rgb-apply-to-all(string);
+    callback rgb-toggle-swap-lr(string, int);
+    callback rgb-toggle-swap-tb(string, int);
+
+    // Fan callbacks
+    callback fan-add-curve();
+    callback fan-remove-curve(int);
+    callback fan-rename-curve(int, string);
+    callback fan-set-temp-command(int, string);
+    callback fan-point-moved(int, int, float, float);
+    callback fan-point-added(int, float, float);
+    callback fan-point-removed(int, int);
+    callback fan-set-slot-speed(string, int, string);
+    callback fan-set-slot-pwm(string, int, int);
+
+    HorizontalLayout {
+        Sidebar {
+            current-page <=> root.current-page;
+            daemon-connected: root.daemon-connected;
+            device-count: root.device-count;
+            config-dirty: root.config-dirty;
+        }
+
+        // Separator
+        Rectangle {
+            width: 1px;
+            background: Theme.border;
+        }
+
+        // Page content
+        Rectangle {
+            horizontal-stretch: 1;
+
+            if root.current-page == 0: DevicesPage {
+                devices: root.devices;
+                streaming-active: root.streaming-active;
+                refresh => { root.refresh-devices(); }
+            }
+
+            if root.current-page == 1: LcdPage {
+                lcd-entries: root.lcd-entries;
+                device-options: root.lcd-device-options;
+                has-config: root.has-config;
+                add-lcd => { root.add-lcd(); }
+                remove-lcd(idx) => { root.remove-lcd(idx); }
+                update-lcd-field(idx, field, val) => { root.update-lcd-field(idx, field, val); }
+                pick-lcd-file(idx) => { root.pick-lcd-file(idx); }
+                save-config => { root.save-config(); }
+            }
+
+            if root.current-page == 2: FansPage {
+                fan-curves: root.fan-curves;
+                fan-groups: root.fan-groups;
+                curve-names: root.curve-names;
+                speed-options: root.fan-speed-options;
+                update-interval: root.fan-update-interval;
+                has-config: root.has-config;
+                add-curve => { root.fan-add-curve(); }
+                remove-curve(idx) => { root.fan-remove-curve(idx); }
+                rename-curve(idx, name) => { root.fan-rename-curve(idx, name); }
+                set-temp-command(idx, cmd) => { root.fan-set-temp-command(idx, cmd); }
+                point-moved(cidx, pidx, temp, speed) => { root.fan-point-moved(cidx, pidx, temp, speed); }
+                point-added(cidx, temp, speed) => { root.fan-point-added(cidx, temp, speed); }
+                point-removed(cidx, pidx) => { root.fan-point-removed(cidx, pidx); }
+                set-slot-speed(dev-id, slot, val) => { root.fan-set-slot-speed(dev-id, slot, val); }
+                set-slot-pwm(dev-id, slot, pct) => { root.fan-set-slot-pwm(dev-id, slot, pct); }
+                save-config => { root.save-config(); }
+            }
+
+            if root.current-page == 3: RgbPage {
+                rgb-devices: root.rgb-devices;
+                openrgb-enabled: root.openrgb-enabled;
+                openrgb-running: root.openrgb-running;
+                openrgb-port: root.openrgb-port;
+                openrgb-error: root.openrgb-error;
+                set-mode(dev-id, zone, mode) => { root.rgb-set-mode(dev-id, zone, mode); }
+                set-speed(dev-id, zone, speed) => { root.rgb-set-speed(dev-id, zone, speed); }
+                set-brightness(dev-id, zone, bright) => { root.rgb-set-brightness(dev-id, zone, bright); }
+                set-direction(dev-id, zone, dir) => { root.rgb-set-direction(dev-id, zone, dir); }
+                set-scope(dev-id, zone, scope) => { root.rgb-set-scope(dev-id, zone, scope); }
+                set-color(dev-id, zone, cidx, r, g, b) => { root.rgb-set-color(dev-id, zone, cidx, r, g, b); }
+                toggle-mb-sync(dev-id, enabled) => { root.rgb-toggle-mb-sync(dev-id, enabled); }
+                apply-to-all(dev-id) => { root.rgb-apply-to-all(dev-id); }
+                toggle-swap-lr(dev-id, zone) => { root.rgb-toggle-swap-lr(dev-id, zone); }
+                toggle-swap-tb(dev-id, zone) => { root.rgb-toggle-swap-tb(dev-id, zone); }
+                save-config => { root.save-config(); }
+            }
+
+            if root.current-page == 4: SettingsPage {
+                daemon-connected: root.daemon-connected;
+                socket-path: root.socket-path;
+                streaming-active: root.streaming-active;
+                lcd-count: root.lcd-count;
+                fan-curve-count: root.fan-curve-count;
+                default-fps: root.default-fps;
+                openrgb-enabled: root.openrgb-enabled;
+                openrgb-running: root.openrgb-running;
+                openrgb-port: root.openrgb-port;
+                openrgb-error: root.openrgb-error;
+                toggle-openrgb(enabled) => { root.toggle-openrgb(enabled); }
+                save-config => { root.save-config(); }
+            }
+        }
+    }
+}

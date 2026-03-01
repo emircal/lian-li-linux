@@ -1,0 +1,183 @@
+import { Theme } from "../theme.slint";
+
+export struct CurvePoint {
+    temp: float,
+    speed: float,
+    // Pre-computed pixel positions (set from Rust)
+    px: float,
+    py: float,
+}
+
+export struct LineSegment {
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+}
+
+export component FanCurveEditor inherits Rectangle {
+    in property <string> curve-name: "";
+    in property <[CurvePoint]> points: [];
+    in property <string> curve-path: "";
+    in property <string> clamp-left-path: "";
+    in property <string> clamp-right-path: "";
+
+    callback point-moved(int, float, float);
+    callback point-added(float, float);
+    callback point-removed(int);
+
+    // Plot dimensions
+    property <length> plot-left: 40px;
+    property <length> plot-top: 10px;
+    property <length> plot-width: root.width - plot-left - 10px;
+    property <length> plot-height: root.height - plot-top - 30px;
+
+    min-height: 200px;
+    border-radius: 8px;
+    background: Theme.card-background;
+    border-width: 1px;
+    border-color: Theme.border;
+    clip: true;
+
+    // Y-axis labels
+    for label-val in [0, 25, 50, 75, 100]: Text {
+        text: "\{label-val}%";
+        font-size: 10px;
+        color: Theme.text-secondary;
+        x: 2px;
+        y: root.plot-top + root.plot-height - (label-val / 100.0 * root.plot-height) - 6px;
+        width: 34px;
+        horizontal-alignment: right;
+    }
+
+    // X-axis labels
+    for label-val in [20, 40, 60, 80, 100]: Text {
+        text: "\{label-val}°";
+        font-size: 10px;
+        color: Theme.text-secondary;
+        x: root.plot-left + ((label-val - 20) / 80.0 * root.plot-width) - 10px;
+        y: root.plot-top + root.plot-height + 4px;
+        width: 24px;
+        horizontal-alignment: center;
+    }
+
+    // Grid lines (horizontal)
+    for grid-idx in [0, 1, 2, 3, 4]: Rectangle {
+        x: root.plot-left;
+        y: root.plot-top + (grid-idx / 4.0 * root.plot-height);
+        width: root.plot-width;
+        height: 1px;
+        background: Theme.border.transparentize(0.5);
+    }
+
+    // Grid lines (vertical)
+    for grid-idx in [0, 1, 2, 3, 4]: Rectangle {
+        x: root.plot-left + (grid-idx / 4.0 * root.plot-width);
+        y: root.plot-top;
+        width: 1px;
+        height: root.plot-height;
+        background: Theme.border.transparentize(0.5);
+    }
+
+    // Clamp line left (dashed — rendered as dotted with short segments)
+    if root.clamp-left-path != "": Path {
+        x: root.plot-left;
+        y: root.plot-top;
+        width: root.plot-width;
+        height: root.plot-height;
+        commands: root.clamp-left-path;
+        stroke: Theme.accent.transparentize(0.5);
+        stroke-width: 1.5px;
+    }
+
+    // Clamp line right
+    if root.clamp-right-path != "": Path {
+        x: root.plot-left;
+        y: root.plot-top;
+        width: root.plot-width;
+        height: root.plot-height;
+        commands: root.clamp-right-path;
+        stroke: Theme.accent.transparentize(0.5);
+        stroke-width: 1.5px;
+    }
+
+    // Curve line (polyline via Path)
+    if root.curve-path != "": Path {
+        x: root.plot-left;
+        y: root.plot-top;
+        width: root.plot-width;
+        height: root.plot-height;
+        commands: root.curve-path;
+        stroke: Theme.accent;
+        stroke-width: 2px;
+    }
+
+    // Click area for adding points
+    click-area := TouchArea {
+        x: root.plot-left;
+        y: root.plot-top;
+        width: root.plot-width;
+        height: root.plot-height;
+
+        clicked => {
+            // Convert pixel to temp/speed
+            root.point-added(
+                20.0 + (self.mouse-x / root.plot-width) * 80.0,
+                100.0 - (self.mouse-y / root.plot-height) * 100.0
+            );
+        }
+    }
+
+    // Draggable point circles
+    for pt[pidx] in root.points: Rectangle {
+        x: root.plot-left + pt.px * 1px - 5px;
+        y: root.plot-top + pt.py * 1px - 5px;
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        background: Theme.accent;
+        border-width: 2px;
+        border-color: Theme.accent-text;
+
+        point-touch := TouchArea {
+            moved => {
+                root.point-moved(
+                    pidx,
+                    20.0 + ((root.plot-left + pt.px * 1px - 5px + self.mouse-x) - root.plot-left) / root.plot-width * 80.0,
+                    100.0 - ((root.plot-top + pt.py * 1px - 5px + self.mouse-y) - root.plot-top) / root.plot-height * 100.0
+                );
+            }
+            double-clicked => {
+                root.point-removed(pidx);
+            }
+        }
+
+        // Tooltip showing temp/speed
+        if point-touch.has-hover: Rectangle {
+            x: 12px;
+            y: -20px;
+            width: 80px;
+            height: 18px;
+            border-radius: 3px;
+            background: Theme.text-primary;
+
+            Text {
+                text: "\{round(pt.temp)}°C → \{round(pt.speed)}%";
+                font-size: 10px;
+                color: Theme.card-background;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // Curve name
+    if root.curve-name != "": Text {
+        text: root.curve-name;
+        font-size: 12px;
+        font-weight: 600;
+        color: Theme.text-primary;
+        x: root.plot-left + 4px;
+        y: root.plot-top + 2px;
+    }
+}

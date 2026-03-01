@@ -1,0 +1,397 @@
+import { Theme } from "../theme.slint";
+import { Card, StatusDot } from "../widgets.slint";
+import { PageHeader } from "../page_header.slint";
+import { ColorPicker } from "../components/color_picker.slint";
+import { Button, ScrollView, ComboBox, Slider, CheckBox } from "std-widgets.slint";
+
+export struct RgbColorData {
+    r: int,
+    g: int,
+    b: int,
+}
+
+export struct RgbZoneData {
+    zone-index: int,
+    zone-name: string,
+    led-count: int,
+    mode: string,
+    colors: [RgbColorData],
+    speed: int,
+    brightness: int,
+    direction: string,
+    scope: string,
+    swap-lr: bool,
+    swap-tb: bool,
+}
+
+export struct RgbDeviceData {
+    device-id: string,
+    device-name: string,
+    total-leds: int,
+    mb-rgb-sync: bool,
+    supports-mb-sync: bool,
+    supports-direction: bool,
+    supported-modes: [string],
+    supported-scopes: [string],
+    zones: [RgbZoneData],
+}
+
+component ToggleButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 28px;
+    min-width: 32px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: active ? Theme.accent : Theme.border;
+    background: active ? Theme.accent : transparent;
+
+    TouchArea { clicked => { root.clicked(); } }
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        alignment: center;
+        Text {
+            text: root.label;
+            font-size: 11px;
+            color: active ? Theme.accent-text : Theme.text-primary;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component RgbZoneEditor inherits VerticalLayout {
+    in property <RgbZoneData> zone;
+    in property <[string]> mode-options;
+    in property <bool> supports-direction: false;
+    in property <[string]> scope-options: [];
+
+    callback set-mode(string);
+    callback set-speed(int);
+    callback set-brightness(int);
+    callback set-direction(string);
+    callback set-scope(string);
+    callback set-color(int, int, int, int);
+    callback toggle-swap-lr();
+    callback toggle-swap-tb();
+
+    spacing: 8px;
+
+    // Mode selector
+    HorizontalLayout {
+        spacing: 8px;
+        Text { text: "Mode:"; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; width: 60px; }
+        ComboBox {
+            horizontal-stretch: 1;
+            model: root.mode-options;
+            current-value: root.zone.mode;
+            selected(val) => { root.set-mode(val); }
+        }
+    }
+
+    // Colors (up to 4)
+    if root.zone.mode != "Off" && root.zone.mode != "Rainbow": VerticalLayout {
+        spacing: 4px;
+        Text { text: "Colors"; font-size: 12px; color: Theme.text-secondary; }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            for color-data[cidx] in root.zone.colors: ColorPicker {
+                max-width: 180px;
+                red: color-data.r;
+                green: color-data.g;
+                blue: color-data.b;
+                changed(r, g, b) => { root.set-color(cidx, r, g, b); }
+            }
+        }
+    }
+
+    // Speed slider
+    if root.zone.mode != "Off" && root.zone.mode != "Static": HorizontalLayout {
+        spacing: 8px;
+        Text { text: "Speed:"; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; width: 60px; }
+        Slider {
+            horizontal-stretch: 1;
+            minimum: 0;
+            maximum: 4;
+            value: root.zone.speed;
+            changed(val) => { root.set-speed(round(val)); }
+        }
+        Text { text: "\{root.zone.speed}"; font-size: 12px; color: Theme.text-secondary; width: 20px; vertical-alignment: center; }
+    }
+
+    // Brightness slider
+    if root.zone.mode != "Off": HorizontalLayout {
+        spacing: 8px;
+        Text { text: "Bright:"; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; width: 60px; }
+        Slider {
+            horizontal-stretch: 1;
+            minimum: 0;
+            maximum: 4;
+            value: root.zone.brightness;
+            changed(val) => { root.set-brightness(round(val)); }
+        }
+        Text { text: "\{root.zone.brightness}"; font-size: 12px; color: Theme.text-secondary; width: 20px; vertical-alignment: center; }
+    }
+
+    // Direction buttons
+    if root.zone.mode != "Off" && root.zone.mode != "Static" && root.supports-direction: HorizontalLayout {
+        spacing: 4px;
+        Text { text: "Dir:"; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; width: 60px; }
+        ToggleButton { label: "CW"; active: root.zone.direction == "Clockwise"; clicked => { root.set-direction("Clockwise"); } }
+        ToggleButton { label: "CCW"; active: root.zone.direction == "CounterClockwise"; clicked => { root.set-direction("CounterClockwise"); } }
+        ToggleButton { label: "Up"; active: root.zone.direction == "Up"; clicked => { root.set-direction("Up"); } }
+        ToggleButton { label: "Down"; active: root.zone.direction == "Down"; clicked => { root.set-direction("Down"); } }
+    }
+
+    // Scope buttons (if device has multiple scopes)
+    if root.scope-options.length > 1: HorizontalLayout {
+        spacing: 4px;
+        Text { text: "Scope:"; font-size: 12px; color: Theme.text-secondary; vertical-alignment: center; width: 60px; }
+        for scope-opt in root.scope-options: ToggleButton {
+            label: scope-opt;
+            active: root.zone.scope == scope-opt;
+            clicked => { root.set-scope(scope-opt); }
+        }
+    }
+
+    // Fan direction swaps
+    if root.supports-direction: HorizontalLayout {
+        spacing: 8px;
+        CheckBox {
+            text: "Swap L/R";
+            checked: root.zone.swap-lr;
+            toggled => { root.toggle-swap-lr(); }
+        }
+        CheckBox {
+            text: "Swap T/B";
+            checked: root.zone.swap-tb;
+            toggled => { root.toggle-swap-tb(); }
+        }
+    }
+}
+
+component RgbDeviceCard inherits Card {
+    in property <RgbDeviceData> device;
+    in-out property <int> expanded-zone: -1;
+
+    callback set-mode(string, int, string);
+    callback set-speed(string, int, int);
+    callback set-brightness(string, int, int);
+    callback set-direction(string, int, string);
+    callback set-scope(string, int, string);
+    callback set-color(string, int, int, int, int, int);
+    callback toggle-mb-sync(string, bool);
+    callback apply-to-all(string);
+    callback toggle-swap-lr(string, int);
+    callback toggle-swap-tb(string, int);
+
+    VerticalLayout {
+        spacing: 8px;
+
+        // Device header
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.device.device-name;
+                font-size: 15px;
+                font-weight: 600;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
+            Text {
+                text: "\{root.device.zones.length} zones, \{root.device.total-leds} LEDs";
+                font-size: 12px;
+                color: Theme.text-secondary;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+
+            if root.device.supports-mb-sync: CheckBox {
+                text: "MB Sync";
+                checked: root.device.mb-rgb-sync;
+                toggled => { root.toggle-mb-sync(root.device.device-id, self.checked); }
+            }
+        }
+
+        // Zone list
+        if !root.device.mb-rgb-sync: VerticalLayout {
+            spacing: 4px;
+
+            for zone-data[zidx] in root.device.zones: VerticalLayout {
+                spacing: 0px;
+
+                // Zone header (click to expand)
+                Rectangle {
+                    height: 32px;
+                    border-radius: 4px;
+                    background: root.expanded-zone == zidx ? Theme.accent.transparentize(0.9) : transparent;
+
+                    TouchArea {
+                        clicked => {
+                            root.expanded-zone = root.expanded-zone == zidx ? -1 : zidx;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 8px;
+
+                        Text {
+                            text: root.expanded-zone == zidx ? "\u{25BC}" : "\u{25B6}";
+                            font-size: 10px;
+                            color: Theme.text-secondary;
+                            vertical-alignment: center;
+                            width: 14px;
+                        }
+                        Text {
+                            text: zone-data.zone-name;
+                            font-size: 13px;
+                            color: Theme.text-primary;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: "\{zone-data.led-count} LEDs";
+                            font-size: 11px;
+                            color: Theme.text-secondary;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: zone-data.mode;
+                            font-size: 11px;
+                            color: Theme.accent;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Zone editor (expanded)
+                if root.expanded-zone == zidx: Rectangle {
+                    border-radius: 4px;
+                    background: Theme.card-background;
+
+                    VerticalLayout {
+                        padding: 12px;
+                        RgbZoneEditor {
+                            zone: zone-data;
+                            mode-options: root.device.supported-modes;
+                            supports-direction: root.device.supports-direction;
+                            scope-options: root.device.supported-scopes;
+                            set-mode(mode) => { root.set-mode(root.device.device-id, zidx, mode); }
+                            set-speed(speed) => { root.set-speed(root.device.device-id, zidx, speed); }
+                            set-brightness(brightness) => { root.set-brightness(root.device.device-id, zidx, brightness); }
+                            set-direction(dir) => { root.set-direction(root.device.device-id, zidx, dir); }
+                            set-scope(scope) => { root.set-scope(root.device.device-id, zidx, scope); }
+                            set-color(cidx, r, g, b) => { root.set-color(root.device.device-id, zidx, cidx, r, g, b); }
+                            toggle-swap-lr => { root.toggle-swap-lr(root.device.device-id, zidx); }
+                            toggle-swap-tb => { root.toggle-swap-tb(root.device.device-id, zidx); }
+                        }
+                    }
+                }
+            }
+
+            // Apply to all button
+            if root.device.zones.length > 1: HorizontalLayout {
+                alignment: end;
+                padding-top: 4px;
+                Button {
+                    text: "Apply to All Zones";
+                    clicked => { root.apply-to-all(root.device.device-id); }
+                }
+            }
+        }
+    }
+}
+
+export component RgbPage inherits VerticalLayout {
+    in property <[RgbDeviceData]> rgb-devices: [];
+    in property <bool> openrgb-enabled: false;
+    in property <bool> openrgb-running: false;
+    in property <int> openrgb-port: 6743;
+    in property <string> openrgb-error: "";
+
+    callback set-mode(string, int, string);
+    callback set-speed(string, int, int);
+    callback set-brightness(string, int, int);
+    callback set-direction(string, int, string);
+    callback set-scope(string, int, string);
+    callback set-color(string, int, int, int, int, int);
+    callback toggle-mb-sync(string, bool);
+    callback apply-to-all(string);
+    callback toggle-swap-lr(string, int);
+    callback toggle-swap-tb(string, int);
+    callback save-config();
+
+    PageHeader {
+        title: "RGB";
+
+        HorizontalLayout {
+            alignment: end;
+            vertical-stretch: 0;
+            Button {
+                text: "Save";
+                clicked => { root.save-config(); }
+            }
+        }
+    }
+
+    ScrollView {
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+
+            // OpenRGB status card
+            Card {
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "OpenRGB SDK Server";
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Theme.text-primary;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout {
+                        alignment: center;
+                        StatusDot { active: root.openrgb-running; }
+                    }
+                    Text {
+                        text: root.openrgb-running ? "Listening on port \{root.openrgb-port}" :
+                              root.openrgb-error != "" ? "Error" : "Disabled";
+                        font-size: 12px;
+                        color: root.openrgb-running ? Theme.status-ok : Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Device cards
+            for rgb-dev[didx] in root.rgb-devices: RgbDeviceCard {
+                device: rgb-dev;
+                set-mode(dev-id, zone, mode) => { root.set-mode(dev-id, zone, mode); }
+                set-speed(dev-id, zone, speed) => { root.set-speed(dev-id, zone, speed); }
+                set-brightness(dev-id, zone, bright) => { root.set-brightness(dev-id, zone, bright); }
+                set-direction(dev-id, zone, dir) => { root.set-direction(dev-id, zone, dir); }
+                set-scope(dev-id, zone, scope) => { root.set-scope(dev-id, zone, scope); }
+                set-color(dev-id, zone, cidx, r, g, b) => { root.set-color(dev-id, zone, cidx, r, g, b); }
+                toggle-mb-sync(dev-id, enabled) => { root.toggle-mb-sync(dev-id, enabled); }
+                apply-to-all(dev-id) => { root.apply-to-all(dev-id); }
+                toggle-swap-lr(dev-id, zone) => { root.toggle-swap-lr(dev-id, zone); }
+                toggle-swap-tb(dev-id, zone) => { root.toggle-swap-tb(dev-id, zone); }
+            }
+
+            if root.rgb-devices.length == 0: Text {
+                text: "No RGB-capable devices found.";
+                font-size: 14px;
+                color: Theme.text-secondary;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}

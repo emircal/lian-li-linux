@@ -1,0 +1,17 @@
+[package]
+name = "lianli-gui2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lianli-shared = { path = "../lianli-shared" }
+slint = { git = "https://github.com/slint-ui/slint" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rfd = "0.15"
+
+[build-dependencies]
+slint-build = { git = "https://github.com/slint-ui/slint" }
