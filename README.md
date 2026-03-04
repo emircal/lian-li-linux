@@ -53,15 +53,13 @@ The GUI connects over `$XDG_RUNTIME_DIR/lianli-daemon.sock`.
 
 ## Building
 
-### Arch Linux
+### Arch Linux (AUR)
 
-A PKGBUILD is available in `packaging/archlinux/`:
 ```bash
-cd packaging/archlinux
-makepkg -si
+yay -S lianli-linux-git
 ```
 
-This installs both binaries, udev rules, systemd service (auto-enabled), desktop entry, and icons. After installing, reboot or run:
+Or with any AUR helper (`paru`, `trizen`, etc.). This installs both binaries, udev rules, systemd service (auto-enabled), desktop entry, and icons. After installing, reboot or run:
 ```bash
 sudo udevadm control --reload-rules && sudo udevadm trigger
 systemctl --user daemon-reload && systemctl --user start lianli-daemon
