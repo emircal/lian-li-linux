@@ -5,19 +5,20 @@ use crate::rgb_controller::RgbController;
 use anyhow::Result;
 use lianli_devices::crypto::PacketBuilder;
 use lianli_devices::detect::{
-    enumerate_devices, enumerate_hid_devices, find_wireless_lcd_devices, open_fan_device,
-    open_rgb_devices,
+    enumerate_devices, enumerate_hid_devices, open_fan_device, open_rgb_devices, DetectedDevice,
 };
 use lianli_devices::slv3_lcd::Slv3LcdDevice;
 use lianli_devices::traits::FanDevice;
+use lianli_devices::winusb_lcd::WinUsbLcdDevice;
 use lianli_devices::wireless::WirelessController;
+use lianli_shared::device_id::DeviceFamily;
 use lianli_media::{prepare_media_asset, MediaAsset, SensorAsset};
 use lianli_shared::config::{config_identity, AppConfig, ConfigKey};
 use lianli_shared::ipc::DeviceInfo;
 use lianli_shared::media::MediaType;
 use lianli_shared::screen::{screen_info_for, ScreenInfo};
 use parking_lot::Mutex;
-use rusb::{Device, GlobalContext};
+use rusb::Device;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -626,10 +627,28 @@ impl ServiceManager {
 
     fn prepare_media_assets(&mut self) {
         self.media_assets.clear();
+
+        // Build a serial to ScreenInfo map from currently connected devices so each
+        // LCD gets its correct native resolution (e.g., H2 = 480×480, not 400×400).
+        let screen_map: HashMap<String, ScreenInfo> = enumerate_devices()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|det| {
+                let serial = det.serial?;
+                let screen = screen_info_for(det.family)?;
+                Some((serial, screen))
+            })
+            .collect();
+
         if let Some(cfg) = &self.config {
-            // Phase 1: all LCD configs use wireless LCD screen info
-            let screen = ScreenInfo::WIRELESS_LCD;
             for (idx, device) in cfg.lcds.iter().enumerate() {
+                // Look up screen info by serial; fall back to WIRELESS_LCD (400×400) for
+                // devices not currently connected or without a matching serial.
+                let screen = device
+                    .serial
+                    .as_ref()
+                    .and_then(|s| screen_map.get(s).copied())
+                    .unwrap_or(ScreenInfo::WIRELESS_LCD);
                 let cfg_key = config_identity(device);
                 match prepare_media_asset(device, cfg.default_fps, &screen) {
                     Ok(asset) => {
@@ -657,7 +676,15 @@ impl ServiceManager {
             return;
         }
 
-        let devices = match find_wireless_lcd_devices() {
+        const LCD_FAMILIES: &[DeviceFamily] = &[
+            DeviceFamily::Slv3Lcd,
+            DeviceFamily::Tlv2Lcd,
+            DeviceFamily::HydroShift2Lcd,
+            DeviceFamily::Lancool207,
+            DeviceFamily::UniversalScreen,
+        ];
+
+        let all_detected = match enumerate_devices() {
             Ok(devs) => devs,
             Err(err) => {
                 warn!("failed to enumerate LCD devices: {err}");
@@ -665,20 +692,18 @@ impl ServiceManager {
             }
         };
 
-        let mut device_info: Vec<(Device<GlobalContext>, String)> = Vec::new();
-        for device in devices {
-            let desc = match device.device_descriptor() {
-                Ok(d) => d,
-                Err(_) => continue,
-            };
-            let serial = device
-                .open()
-                .and_then(|h| h.read_serial_number_string_ascii(&desc))
-                .unwrap_or_else(|_| {
-                    format!("bus{}-addr{}", device.bus_number(), device.address())
-                });
-            device_info.push((device, serial));
-        }
+        // Filter to LCD families; serial is already resolved by enumerate_devices().
+        let device_info: Vec<(DetectedDevice, String)> = all_detected
+            .into_iter()
+            .filter(|d| LCD_FAMILIES.contains(&d.family))
+            .map(|d| {
+                let serial = d
+                    .serial
+                    .clone()
+                    .unwrap_or_else(|| format!("bus{}-addr{}", d.bus, d.address));
+                (d, serial)
+            })
+            .collect();
 
         let mut new_targets = HashMap::new();
 
@@ -694,16 +719,16 @@ impl ServiceManager {
                     }
                 };
 
-                let matched_device = if let Some(serial) = &device_cfg.serial {
-                    device_info.iter().find(|(_, s)| s == serial).map(|(d, _)| d)
+                let matched = if let Some(serial) = &device_cfg.serial {
+                    device_info.iter().find(|(_, s)| s == serial)
                 } else if let Some(index) = device_cfg.index {
-                    device_info.get(index).map(|(d, _)| d)
+                    device_info.get(index)
                 } else {
                     None
                 };
 
-                let device = match matched_device {
-                    Some(dev) => Device::clone(dev),
+                let (det, serial) = match matched {
+                    Some(pair) => pair,
                     None => {
                         if let Some(mut existing) = self.targets.remove(&cfg_idx) {
                             info!("[devices] LCD[{}] detached", device_cfg.device_id());
@@ -715,7 +740,7 @@ impl ServiceManager {
 
                 let cfg_key = config_identity(device_cfg);
                 if let Some(mut existing) = self.targets.remove(&cfg_idx) {
-                    if existing.matches(&device, &cfg_key) {
+                    if existing.matches(det.bus, det.address, &cfg_key) {
                         new_targets.insert(cfg_idx, existing);
                         continue;
                     } else {
@@ -723,12 +748,30 @@ impl ServiceManager {
                     }
                 }
 
-                match Slv3LcdDevice::new(device) {
+                // Open as the appropriate backend for this device family.
+                let device = Device::clone(&det.device);
+                let backend_result: anyhow::Result<LcdBackend> = match det.family {
+                    DeviceFamily::Slv3Lcd | DeviceFamily::Tlv2Lcd => {
+                        Slv3LcdDevice::new(device).map(LcdBackend::Slv3)
+                    }
+                    DeviceFamily::HydroShift2Lcd => {
+                        lianli_devices::hydroshift2_lcd::open(device).map(LcdBackend::WinUsb)
+                    }
+                    DeviceFamily::Lancool207 => {
+                        lianli_devices::lancool207::open(device).map(LcdBackend::WinUsb)
+                    }
+                    DeviceFamily::UniversalScreen => {
+                        lianli_devices::universal_screen::open(device).map(LcdBackend::WinUsb)
+                    }
+                    _ => unreachable!(),
+                };
+
+                match backend_result {
                     Ok(lcd) => {
                         info!(
                             "[devices] LCD[{}] attached (serial: {}, orientation: {:.0}°)",
                             device_cfg.device_id(),
-                            lcd.serial(),
+                            serial,
                             device_cfg.orientation
                         );
                         let target = ActiveTarget::new(cfg_idx, cfg_key, lcd, asset);
@@ -744,10 +787,8 @@ impl ServiceManager {
             }
         }
 
-        for (idx, mut target) in self.targets.drain() {
-            if !new_targets.contains_key(&idx) {
-                target.stop();
-            }
+        for (_, mut target) in self.targets.drain() {
+            target.stop();
         }
 
         self.targets = new_targets;
@@ -804,17 +845,53 @@ impl ServiceManager {
     }
 }
 
+enum LcdBackend {
+    Slv3(Slv3LcdDevice),
+    WinUsb(WinUsbLcdDevice),
+}
+
+impl LcdBackend {
+    fn bus(&self) -> u8 {
+        match self {
+            Self::Slv3(d) => d.bus(),
+            Self::WinUsb(d) => d.bus(),
+        }
+    }
+
+    fn address(&self) -> u8 {
+        match self {
+            Self::Slv3(d) => d.address(),
+            Self::WinUsb(d) => d.address(),
+        }
+    }
+
+    fn send_frame(
+        &mut self,
+        wireless: &WirelessController,
+        builder: &mut PacketBuilder,
+        frame: &[u8],
+    ) -> anyhow::Result<()> {
+        match self {
+            Self::Slv3(d) => {
+                wireless.ensure_video_mode()?;
+                d.send_frame(builder, frame)
+            }
+            Self::WinUsb(d) => d.send_frame(frame),
+        }
+    }
+}
+
 struct ActiveTarget {
     index: usize,
     key: ConfigKey,
-    lcd: Slv3LcdDevice,
+    lcd: LcdBackend,
     media: MediaRuntime,
     next_due: Option<Instant>,
     frame_counter: u64,
 }
 
 impl ActiveTarget {
-    fn new(index: usize, key: ConfigKey, lcd: Slv3LcdDevice, asset: &MediaAsset) -> Self {
+    fn new(index: usize, key: ConfigKey, lcd: LcdBackend, asset: &MediaAsset) -> Self {
         Self {
             index,
             key,
@@ -825,10 +902,8 @@ impl ActiveTarget {
         }
     }
 
-    fn matches(&self, device: &Device<GlobalContext>, key: &ConfigKey) -> bool {
-        device.bus_number() == self.lcd.bus()
-            && device.address() == self.lcd.address()
-            && key == &self.key
+    fn matches(&self, bus: u8, address: u8, key: &ConfigKey) -> bool {
+        bus == self.lcd.bus() && address == self.lcd.address() && key == &self.key
     }
 
     fn should_send(&self, now: Instant) -> bool {
@@ -851,9 +926,8 @@ impl ActiveTarget {
             None => return Ok(false),
         };
 
-        wireless.ensure_video_mode().map_err(SendError::Other)?;
         self.lcd
-            .send_frame(builder, frame)
+            .send_frame(wireless, builder, frame)
             .map_err(|err| match err.downcast::<lianli_transport::TransportError>() {
                 Ok(usb) => SendError::Usb(usb),
                 Err(other) => SendError::Other(other),

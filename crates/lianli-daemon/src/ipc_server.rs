@@ -1,6 +1,6 @@
 //! IPC server: Unix domain socket for daemon ↔ GUI communication.
 //!
-//! Protocol: newline-delimited JSON (one request → one response per connection).
+//! Protocol: newline-delimited JSON (one request is one response per connection).
 //! The GUI polls periodically for telemetry. Config writes go through IPC.
 
 use crate::rgb_controller::RgbController;

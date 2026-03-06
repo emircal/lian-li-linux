@@ -880,7 +880,7 @@ impl Drop for WirelessController {
 /// Apply minimum duty enforcement and CLV1 PWM filter.
 ///
 /// Enforces per-fan-type minimums and special PWM remapping
-/// for CLV1 devices (values 153-155 → 152/156).
+/// for CLV1 devices (values 153-155 to 152/156).
 fn apply_pwm_constraints(pwm: &mut [u8; 4], device: &DiscoveredDevice) {
     let min_pwm = ((device.fan_type.min_duty_percent() as f32 / 100.0) * 255.0) as u8;
 

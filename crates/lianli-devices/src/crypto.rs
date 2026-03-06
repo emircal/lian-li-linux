@@ -97,7 +97,7 @@ impl PacketBuilder {
     // WinUsbH2.cs uses a 500-byte plaintext (GetBaseCmdBuf), DES-CBC-PKCS7
     // encrypts it to 504 bytes, then places the result in a 512-byte frame with
     // fixed trailer bytes [510]=0xa1, [511]=0x1a.  This differs from the SLV3
-    // format (504-byte plaintext → 512 encrypted, no trailer).
+    // format (504-byte plaintext is 512 encrypted, no trailer).
 
     fn build_h2(&mut self, command: u8, params: &[u8]) -> Vec<u8> {
         // 500-byte plaintext; need 500 + block_size(8) bytes for encrypt_padded_mut
@@ -121,7 +121,7 @@ impl PacketBuilder {
         let copy_len = params.len().min(492);
         buf[8..8 + copy_len].copy_from_slice(&params[..copy_len]);
 
-        // Encrypt the first 500 bytes: PKCS7 pads 500 → 504 bytes (adds 4 bytes)
+        // Encrypt the first 500 bytes: PKCS7 pads 500 -> 504 bytes (adds 4 bytes)
         let cipher = DesCbc::new_from_slices(&DES_KEY, &DES_KEY)
             .expect("DES key and IV must both be 8 bytes");
         let encrypted = cipher
