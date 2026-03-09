@@ -127,19 +127,18 @@ impl AppConfig {
 
         let mut warnings = Vec::new();
         let mut seen = HashSet::new();
-        cfg.lcds.retain_mut(|device| {
+        for device in &mut cfg.lcds {
             let identifier = if let Some(serial) = &device.serial {
                 format!("serial:{serial}")
             } else if let Some(index) = device.index {
                 format!("index:{index}")
             } else {
-                warnings.push("Skipping LCD entry: missing both 'index' and 'serial'".to_string());
-                return false;
+                warnings.push("LCD entry missing both 'index' and 'serial'".to_string());
+                continue;
             };
 
             if !seen.insert(identifier.clone()) {
-                warnings.push(format!("Skipping duplicate LCD entry '{identifier}'"));
-                return false;
+                warnings.push(format!("Duplicate LCD entry '{identifier}'"));
             }
 
             if let Some(existing) = &device.path {
@@ -156,14 +155,10 @@ impl AppConfig {
                 }
             }
 
-            match device.validate() {
-                Ok(()) => true,
-                Err(e) => {
-                    warnings.push(format!("Skipping LCD entry: {e}"));
-                    false
-                }
+            if let Err(e) = device.validate() {
+                warnings.push(format!("{e}"));
             }
-        });
+        }
 
         if cfg.default_fps <= 0.0 {
             bail!("default_fps must be greater than zero");
