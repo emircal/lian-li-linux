@@ -193,7 +193,6 @@ impl HydroShiftLcdController {
 
         match self.read_firmware_internal(INIT_READ_TIMEOUT_MS) {
             Ok(fw) => {
-                // Firmware >= 1.2 supports smaller 512-byte C-command packets.
                 if let Some(ver) = parse_firmware_version(&fw) {
                     if ver >= (1, 2) {
                         info!("  Firmware: {fw} (using 512-byte frame mode)");
@@ -205,7 +204,7 @@ impl HydroShiftLcdController {
                     info!("  Firmware: {fw}");
                 }
             }
-            Err(e) => warn!("  Failed to read firmware: {e}"),
+            Err(e) => warn!("  Failed to read firmware: {e:#}"),
         }
 
         match self.handshake() {
@@ -215,7 +214,7 @@ impl HydroShiftLcdController {
                     hs.fan_rpm, hs.pump_rpm, hs.coolant_temp, hs.temp_valid
                 );
             }
-            Err(e) => warn!("  Handshake failed: {e}"),
+            Err(e) => warn!("  Handshake failed: {e:#}"),
         }
 
         std::thread::sleep(std::time::Duration::from_secs(2));
@@ -267,7 +266,7 @@ impl HydroShiftLcdController {
 
         self.send_b_command(CMD_LCD_CONTROL, &payload)?;
         debug!(
-            "LCD settings: brightness={}, rotation={:?}",
+            "LCD settings applied: brightness={}, rotation={:?}",
             self.brightness, self.rotation
         );
         Ok(())
@@ -297,15 +296,18 @@ impl HydroShiftLcdController {
         pkt[1] = CMD_GET_FIRMWARE;
 
         let dev = self.device.lock();
-        dev.write(&pkt).context("AIO LCD: write firmware request")?;
+        let written = dev.write(&pkt).context("AIO LCD: write firmware request")?;
+        debug!("firmware request: wrote {written} bytes");
 
         let mut buf = [0u8; A_PACKET_SIZE];
         let n = dev
             .read_timeout(&mut buf, timeout_ms)
             .context("AIO LCD: read firmware")?;
 
+        debug!("firmware response: {n} bytes, raw={:02x?}", &buf[..n.min(20)]);
+
         if n == 0 {
-            bail!("AIO LCD: no firmware response");
+            bail!("AIO LCD: no firmware response (timeout after {timeout_ms}ms)");
         }
 
         let data_len = buf[5] as usize;
@@ -324,15 +326,18 @@ impl HydroShiftLcdController {
         pkt[A_HEADER_LEN..A_HEADER_LEN + copy_len].copy_from_slice(&data[..copy_len]);
 
         let dev = self.device.lock();
-        dev.write(&pkt).context("AIO LCD: write A-command")?;
+        let written = dev.write(&pkt).context("AIO LCD: write A-command")?;
+        debug!("A-cmd {cmd:#04x}: wrote {written} bytes, payload={:02x?}", &data[..copy_len]);
 
         let mut buf = [0u8; A_PACKET_SIZE];
         let n = dev
             .read_timeout(&mut buf, READ_TIMEOUT_MS)
             .context("AIO LCD: read A-response")?;
 
+        debug!("A-cmd {cmd:#04x}: response {n} bytes, raw={:02x?}", &buf[..n.min(20)]);
+
         if n == 0 {
-            bail!("AIO LCD: no response to A-command {cmd:#04x}");
+            bail!("AIO LCD: no response to A-command {cmd:#04x} (timeout after {READ_TIMEOUT_MS}ms)");
         }
 
         Ok(buf[..n].to_vec())
