@@ -12,6 +12,7 @@ pub const CMD_GET_VER: u8 = 0x0A;
 pub const CMD_ROTATE: u8 = 0x0D;
 pub const CMD_BRIGHTNESS: u8 = 0x0E;
 pub const CMD_FRAME_RATE: u8 = 0x0F;
+pub const CMD_STOP_CLOCK: u8 = 0x34;
 pub const CMD_PUSH_JPG: u8 = 0x65;
 pub const CMD_START_PLAY: u8 = 0x79;
 pub const CMD_QUERY_BLOCK: u8 = 0x7A;
@@ -93,14 +94,9 @@ impl PacketBuilder {
         self.build(CMD_FRAME_RATE, &[fps])
     }
 
-    // ── H2 (HydroShift II) packet format ─────────────────────────────────────
-    //
-    // WinUsbH2.cs uses a 500-byte plaintext (GetBaseCmdBuf), DES-CBC-PKCS7
-    // encrypts it to 504 bytes, then places the result in a 512-byte frame with
-    // fixed trailer bytes [510]=0xa1, [511]=0x1a.  This differs from the SLV3
-    // format (504-byte plaintext is 512 encrypted, no trailer).
-
-    fn build_h2(&mut self, command: u8, params: &[u8]) -> Vec<u8> {
+    // WinUSB packet format: 500-byte plaintext -> DES-CBC-PKCS7 -> 504 bytes,
+    // placed in a 512-byte frame with trailer [510]=0xa1, [511]=0x1a.
+    fn build_winusb(&mut self, command: u8, params: &[u8]) -> Vec<u8> {
         // 500-byte plaintext; need 500 + block_size(8) bytes for encrypt_padded_mut
         let mut buf = vec![0u8; 508];
         buf[0] = command;
@@ -139,29 +135,32 @@ impl PacketBuilder {
         out
     }
 
-    /// Build an H2 JPEG frame header (cmd 0x65 with payload size).
-    pub fn jpeg_header_h2(&mut self, jpeg_size: usize) -> Vec<u8> {
-        self.build_h2(CMD_PUSH_JPG, &(jpeg_size as u32).to_be_bytes())
+    pub fn jpeg_header_winusb(&mut self, jpeg_size: usize) -> Vec<u8> {
+        self.build_winusb(CMD_PUSH_JPG, &(jpeg_size as u32).to_be_bytes())
     }
 
-    /// Build an H2 frame rate header (cmd 0x0F).
-    pub fn frame_rate_header_h2(&mut self, fps: u8) -> Vec<u8> {
-        self.build_h2(CMD_FRAME_RATE, &[fps])
+    pub fn frame_rate_header_winusb(&mut self, fps: u8) -> Vec<u8> {
+        self.build_winusb(CMD_FRAME_RATE, &[fps])
     }
 
-    /// Build an H2 rotation header (cmd 0x0D, value 0-3).
-    pub fn rotation_header_h2(&mut self, rotation: u8) -> Vec<u8> {
-        self.build_h2(CMD_ROTATE, &[rotation & 0x03])
+    pub fn rotation_header_winusb(&mut self, rotation: u8) -> Vec<u8> {
+        self.build_winusb(CMD_ROTATE, &[rotation & 0x03])
     }
 
-    /// Build an H2 brightness header (cmd 0x0E, value 0-100).
-    pub fn brightness_header_h2(&mut self, brightness: u8) -> Vec<u8> {
-        self.build_h2(CMD_BRIGHTNESS, &[brightness.min(100)])
+    pub fn brightness_header_winusb(&mut self, brightness: u8) -> Vec<u8> {
+        self.build_winusb(CMD_BRIGHTNESS, &[brightness.min(100)])
     }
 
-    /// Build an H2 GetVer header (cmd 0x0A) — queries firmware version.
-    pub fn get_ver_header_h2(&mut self) -> Vec<u8> {
-        self.build_h2(CMD_GET_VER, &[])
+    pub fn get_ver_header_winusb(&mut self) -> Vec<u8> {
+        self.build_winusb(CMD_GET_VER, &[])
+    }
+
+    pub fn stop_play_header_winusb(&mut self) -> Vec<u8> {
+        self.build_winusb(CMD_STOP_PLAY, &[])
+    }
+
+    pub fn stop_clock_header_winusb(&mut self) -> Vec<u8> {
+        self.build_winusb(CMD_STOP_CLOCK, &[0])
     }
 }
 

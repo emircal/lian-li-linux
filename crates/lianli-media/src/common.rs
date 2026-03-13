@@ -21,17 +21,27 @@ pub enum MediaError {
     Sensor(String),
 }
 
-pub fn encode_jpeg(image: &RgbImage, screen: &ScreenInfo) -> Result<Vec<u8>, MediaError> {
+pub fn encode_jpeg(image: RgbImage, screen: &ScreenInfo) -> Result<Vec<u8>, MediaError> {
+    let final_image = apply_device_rotation(image, screen.device_rotation);
     let mut buf = Vec::new();
     {
         let mut encoder =
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, screen.jpeg_quality);
-        encoder.encode_image(image)?;
+        encoder.encode_image(&final_image)?;
     }
     if buf.len() > screen.max_payload {
         return Err(MediaError::PayloadTooLarge { size: buf.len() });
     }
     Ok(buf)
+}
+
+fn apply_device_rotation(image: RgbImage, rotation: u16) -> RgbImage {
+    match rotation {
+        90 => rotate90(&image),
+        180 => rotate180(&image),
+        270 => rotate270(&image),
+        _ => image,
+    }
 }
 
 pub fn apply_orientation(image: RgbImage, orientation: f32) -> RgbImage {

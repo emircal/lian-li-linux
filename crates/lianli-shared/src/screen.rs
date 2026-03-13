@@ -7,8 +7,8 @@ pub struct ScreenInfo {
     pub height: u32,
     pub max_fps: u32,
     pub jpeg_quality: u8,
-    /// Maximum JPEG payload size in bytes (total packet minus header).
     pub max_payload: usize,
+    pub device_rotation: u16,
 }
 
 impl ScreenInfo {
@@ -18,52 +18,54 @@ impl ScreenInfo {
         height: 400,
         max_fps: 30,
         jpeg_quality: 90,
-        max_payload: 102_400 - 512, // 101,888
+        max_payload: 102_400 - 512,
+        device_rotation: 0,
     };
 
-    /// TLLCD HID fans (400x400, 512-byte HID output reports, 501-byte payload per packet).
     pub const TLLCD: Self = Self {
         width: 400,
         height: 400,
         max_fps: 30,
         jpeg_quality: 90,
         max_payload: 65_535,
+        device_rotation: 0,
     };
 
-    /// HydroShift LCD / Galahad2 LCD AIO (480x480).
     pub const AIO_LCD_480: Self = Self {
         width: 480,
         height: 480,
         max_fps: 24,
         jpeg_quality: 85,
         max_payload: 153_600,
+        device_rotation: 0,
     };
 
-    /// HydroShift II LCD Circle (480x480 via WinUSB).
     pub const HYDROSHIFT2: Self = Self {
         width: 480,
         height: 480,
         max_fps: 24,
         jpeg_quality: 85,
         max_payload: 153_600,
+        device_rotation: 0,
     };
 
-    /// Lancool 207 Digital (1472x720 via WinUSB).
+    /// Lancool 207: renders at 1472x720 landscape, rotated 90° CW for device.
     pub const LANCOOL_207: Self = Self {
         width: 1472,
         height: 720,
         max_fps: 30,
-        jpeg_quality: 80,
+        jpeg_quality: 95,
         max_payload: 512_000,
+        device_rotation: 90,
     };
 
-    /// Universal Screen 8.8" (1920x480 via WinUSB).
     pub const UNIVERSAL_SCREEN: Self = Self {
         width: 1920,
         height: 480,
         max_fps: 30,
         jpeg_quality: 80,
         max_payload: 512_000,
+        device_rotation: 0,
     };
 }
 

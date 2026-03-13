@@ -113,29 +113,10 @@ impl UsbTransport {
         }
     }
 
-    /// Try interrupt read first, fall back to bulk. Latches the working type.
-    pub fn read_with_fallback(&mut self, buf: &mut [u8], timeout: Duration) -> Result<usize, TransportError> {
-        if self.ep_in_interrupt {
-            return self.read(buf, timeout);
-        }
-
-        match self.handle.read_interrupt(self.ep_in, buf, timeout) {
-            Ok(n) if n > 0 => {
-                info!("Interrupt read succeeded ({n} bytes), switching endpoint type");
-                self.ep_in_interrupt = true;
-                return Ok(n);
-            }
-            interrupt_result => {
-                match self.handle.read_bulk(self.ep_in, buf, timeout) {
-                    Ok(n) if n > 0 => {
-                        info!("Bulk read succeeded ({n} bytes)");
-                        return Ok(n);
-                    }
-                    Ok(_) | Err(rusb::Error::Timeout) => interrupt_result.map_err(|e| e.into()),
-                    Err(e) => Err(e.into()),
-                }
-            }
-        }
+    /// Drain any remaining data from the read pipe.
+    pub fn read_flush(&self) {
+        let mut buf = [0u8; 512];
+        let _ = self.read(&mut buf, Duration::from_millis(1));
     }
 
     pub fn release(&self) {

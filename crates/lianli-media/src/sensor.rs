@@ -162,7 +162,7 @@ impl SensorAsset {
         }
 
         let oriented = apply_orientation(image, self.orientation);
-        encode_jpeg(&oriented, &self.screen)
+        encode_jpeg(oriented, &self.screen)
     }
 
     pub fn blank_frame(&self) -> Vec<u8> {
@@ -172,7 +172,7 @@ impl SensorAsset {
             Rgb(self.background_color),
         );
         let oriented = apply_orientation(image, self.orientation);
-        encode_jpeg(&oriented, &self.screen).unwrap_or_default()
+        encode_jpeg(oriented, &self.screen).unwrap_or_default()
     }
 
     fn color_for_value(&self, value: f32) -> [u8; 3] {

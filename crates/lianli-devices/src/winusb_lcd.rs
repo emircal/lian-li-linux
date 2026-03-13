@@ -95,7 +95,7 @@ impl WinUsbLcdDevice {
             self.do_init()?;
         }
 
-        let header = self.builder.jpeg_header_h2(frame.len());
+        let header = self.builder.jpeg_header_winusb(frame.len());
         let total = 512 + frame.len();
         let mut packet = vec![0u8; total];
         packet[..512].copy_from_slice(&header);
@@ -132,7 +132,7 @@ impl WinUsbLcdDevice {
 
     /// Set LCD brightness (0-100).
     pub fn set_brightness_val(&mut self, brightness: u8) -> Result<()> {
-        let header = self.builder.brightness_header_h2(brightness);
+        let header = self.builder.brightness_header_winusb(brightness);
         self.transport
             .write(&header, LCD_WRITE_TIMEOUT)
             .context("setting brightness")?;
@@ -143,7 +143,7 @@ impl WinUsbLcdDevice {
 
     /// Set LCD rotation (0=0°, 1=90°, 2=180°, 3=270°).
     pub fn set_rotation_val(&mut self, rotation: u8) -> Result<()> {
-        let header = self.builder.rotation_header_h2(rotation);
+        let header = self.builder.rotation_header_winusb(rotation);
         self.transport
             .write(&header, LCD_WRITE_TIMEOUT)
             .context("setting rotation")?;
@@ -154,7 +154,7 @@ impl WinUsbLcdDevice {
 
     /// Set frame rate.
     pub fn set_frame_rate(&mut self, fps: u8) -> Result<()> {
-        let header = self.builder.frame_rate_header_h2(fps);
+        let header = self.builder.frame_rate_header_winusb(fps);
         self.transport
             .write(&header, LCD_WRITE_TIMEOUT)
             .context("setting frame rate")?;
@@ -164,30 +164,28 @@ impl WinUsbLcdDevice {
     }
 
     fn do_init(&mut self) -> Result<()> {
-        // GetVer handshake — auto-detects endpoint transfer type.
-        let ver_header = self.builder.get_ver_header_h2();
-        self.transport
-            .write(&ver_header, LCD_WRITE_TIMEOUT)
-            .context("sending GetVer")?;
-        let mut buf = [0u8; 512];
-        match self.transport.read_with_fallback(&mut buf, USB_TIMEOUT) {
-            Ok(n) if n > 0 => {
-                let ver_str = std::str::from_utf8(&buf[8..40])
-                    .unwrap_or("<invalid utf8>")
-                    .trim_end_matches('\0');
-                info!("Device firmware: {ver_str}");
-            }
-            Ok(_) => warn!("No device response to GetVer (timeout on both bulk and interrupt)"),
-            Err(e) => warn!("GetVer read failed: {e}"),
-        }
+        self.transport.read_flush();
 
+        let ver = self.builder.get_ver_header_winusb();
+        self.send_command(ver, "GetVer");
+        let stop_play = self.builder.stop_play_header_winusb();
+        self.send_command(stop_play, "StopPlay");
+        let stop_clock = self.builder.stop_clock_header_winusb();
+        self.send_command(stop_clock, "StopClock");
         self.set_frame_rate(30)?;
 
         self.initialized = true;
         Ok(())
     }
 
-    /// Read device response. Non-fatal — sets `last_read_ok`.
+    fn send_command(&mut self, header: Vec<u8>, label: &str) {
+        if let Err(e) = self.transport.write(&header, LCD_WRITE_TIMEOUT) {
+            warn!("{label} write failed: {e}");
+            return;
+        }
+        self.read_response(label);
+    }
+
     fn read_response(&mut self, context: &str) {
         let mut buf = [0u8; 512];
         match self.transport.read(&mut buf, USB_TIMEOUT) {
@@ -204,6 +202,7 @@ impl WinUsbLcdDevice {
                 self.last_read_ok = false;
             }
         }
+        self.transport.read_flush();
     }
 }
 

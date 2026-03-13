@@ -13,10 +13,10 @@ pub fn load_image_frame(
     let resized =
         image::imageops::resize(&rgb, screen.width, screen.height, FilterType::Lanczos3);
     let oriented = apply_orientation(resized, orientation);
-    encode_jpeg(&oriented, screen)
+    encode_jpeg(oriented, screen)
 }
 
 pub fn build_color_frame(rgb: [u8; 3], screen: &ScreenInfo) -> Vec<u8> {
     let image = ImageBuffer::from_pixel(screen.width, screen.height, Rgb(rgb));
-    encode_jpeg(&image, screen).expect("encoding color frame should not fail")
+    encode_jpeg(image, screen).expect("encoding color frame should not fail")
 }

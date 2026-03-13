@@ -33,7 +33,7 @@ pub fn build_video_frames(
     let mut frames = Vec::with_capacity(entries.len());
     for frame_path in entries {
         let data = std::fs::read(&frame_path)?;
-        if orientation.abs() < f32::EPSILON {
+        if orientation.abs() < f32::EPSILON && screen.device_rotation == 0 {
             if data.len() > screen.max_payload {
                 return Err(MediaError::PayloadTooLarge { size: data.len() });
             }
@@ -41,7 +41,7 @@ pub fn build_video_frames(
         } else {
             let image = load_from_memory(&data)?;
             let rgb = apply_orientation(image.to_rgb8(), orientation);
-            frames.push(encode_jpeg(&rgb, screen)?);
+            frames.push(encode_jpeg(rgb, screen)?);
         }
     }
 
@@ -75,7 +75,7 @@ pub fn build_gif_frames(
         let resized =
             image::imageops::resize(&rgb, screen.width, screen.height, FilterType::Lanczos3);
         let oriented = apply_orientation(resized, orientation);
-        let jpeg = encode_jpeg(&oriented, screen)?;
+        let jpeg = encode_jpeg(oriented, screen)?;
         encoded.push(jpeg);
         durations.push(duration);
     }
