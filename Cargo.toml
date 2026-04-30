@@ -32,11 +32,12 @@ cbc = "0.1"
 des = "0.8"
 
 # Media
-image = { version = "0.24", features = ["jpeg", "png", "bmp", "gif"] }
+image = { version = "0.25", features = ["jpeg", "png", "bmp", "gif"] }
 turbojpeg = "1.4"
-rusttype = "0.9"
+ab_glyph = "0.2"
 tempfile = "3.10"
-imageproc = "0.23"
+imageproc = "0.26"
+fast_image_resize = { version = "6", features = ["image"] }
 
 # Config
 notify = { version = "7.0", default-features = false, features = ["macos_kqueue"] }

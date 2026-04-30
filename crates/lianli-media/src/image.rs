@@ -40,7 +40,7 @@ pub fn encode_aio_image(path: &Path) -> Result<Vec<u8>, MediaError> {
                 resized.as_raw(),
                 resized.width(),
                 resized.height(),
-                image::ColorType::Rgb8,
+                image::ExtendedColorType::Rgb8,
             )
             .map_err(image::ImageError::from)?;
         if buf.len() <= lianli_shared::aio::AIO_PIC_MAX_BYTES {

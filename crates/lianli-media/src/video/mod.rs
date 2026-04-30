@@ -11,6 +11,7 @@ use image::imageops::FilterType;
 use image::{load_from_memory, AnimationDecoder, DynamicImage, Frames, RgbaImage};
 use lianli_shared::screen::ScreenInfo;
 use std::fs::File;
+use std::io::BufReader;
 use std::path::Path;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -63,7 +64,7 @@ pub fn build_gif_frames(
     screen: &ScreenInfo,
     desired_fps: Option<f32>,
 ) -> Result<(Vec<Vec<u8>>, Vec<Duration>), MediaError> {
-    let file = File::open(path)?;
+    let file = BufReader::new(File::open(path)?);
     let decoder = GifDecoder::new(file)?;
     let mut encoded = Vec::new();
     let mut durations = Vec::new();
@@ -127,14 +128,14 @@ pub fn decode_frames_to_rgba(
         .unwrap_or_default();
 
     if ext == "gif" {
-        let decoder = GifDecoder::new(File::open(path)?)?;
+        let decoder = GifDecoder::new(BufReader::new(File::open(path)?))?;
         return decode_animation_frames(decoder.into_frames(), width, height);
     }
 
     if ext == "png" || ext == "apng" {
-        let decoder = PngDecoder::new(File::open(path)?)?;
-        if decoder.is_apng() {
-            let apng = decoder.apng();
+        let decoder = PngDecoder::new(BufReader::new(File::open(path)?))?;
+        if decoder.is_apng()? {
+            let apng = decoder.apng()?;
             return decode_animation_frames(apng.into_frames(), width, height);
         }
         let img = DynamicImage::from_decoder(decoder)?;

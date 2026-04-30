@@ -1,15 +1,15 @@
 //! Static text label.
 
 use super::super::helpers::draw_text_widget;
+use ab_glyph::FontVec;
 use image::RgbaImage;
 use lianli_shared::template::TextAlign;
-use rusttype::Font;
 
 #[allow(clippy::too_many_arguments)]
 pub(in super::super) fn draw(
     sub: &mut RgbaImage,
     text: &str,
-    font: &Font<'static>,
+    font: &FontVec,
     size: f32,
     color: [u8; 4],
     align: TextAlign,

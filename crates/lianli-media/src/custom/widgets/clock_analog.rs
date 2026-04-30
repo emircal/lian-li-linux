@@ -1,6 +1,7 @@
 //! Analog clock with configurable face, ticks, numbers, and three hands.
 
 use super::super::helpers::draw_text_widget;
+use ab_glyph::FontVec;
 use chrono::{Local, Timelike};
 use image::{Rgba, RgbaImage};
 use imageproc::drawing::{
@@ -9,7 +10,6 @@ use imageproc::drawing::{
 use imageproc::pixelops::interpolate;
 use imageproc::point::Point;
 use lianli_shared::template::TextAlign;
-use rusttype::Font;
 use std::f32::consts::PI;
 
 #[allow(clippy::too_many_arguments)]
@@ -23,7 +23,7 @@ pub(in super::super) fn draw(
     second_hand_color: [u8; 4],
     hub_color: [u8; 4],
     numbers_color: [u8; 4],
-    numbers_font: &Font<'static>,
+    numbers_font: &FontVec,
     numbers_font_size: f32,
     show_seconds: bool,
     show_hour_ticks: bool,

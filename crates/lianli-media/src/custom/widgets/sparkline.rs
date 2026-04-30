@@ -4,10 +4,10 @@ use super::super::helpers::{
     fill_rounded_rect, range_color, range_color_blended, render_value_format, unit_interval,
 };
 use crate::common::get_exact_text_metrics;
+use ab_glyph::{FontVec, PxScale};
 use image::{Rgba, RgbaImage};
 use imageproc::drawing::draw_text_mut;
 use lianli_shared::media::SensorRange;
-use rusttype::{Font, Scale};
 use std::collections::VecDeque;
 
 pub(in super::super) struct DrawArgs<'a> {
@@ -43,7 +43,7 @@ pub(in super::super) struct DrawArgs<'a> {
     pub axis_label_count: u32,
     pub axis_labels_on_right: bool,
     pub axis_label_format: &'a str,
-    pub axis_label_font: &'a Font<'static>,
+    pub axis_label_font: &'a FontVec,
     pub axis_label_size: f32,
     pub axis_label_color: [u8; 4],
     pub axis_label_padding: f32,
@@ -78,7 +78,7 @@ pub(in super::super) fn draw(sub: &mut RgbaImage, a: DrawArgs<'_>) {
     let mut plot_x1 = (w as f32 - 1.0 - pad).max(plot_x0);
     let mut plot_y1 = (h as f32 - 1.0 - pad).max(plot_y0);
 
-    let label_scale = Scale::uniform(a.axis_label_size.max(6.0));
+    let label_scale = PxScale::from(a.axis_label_size.max(6.0));
     let (label_reserve_x, label_reserve_y) = if a.show_axis_labels && a.axis_label_color[3] > 0 {
         let label_min = render_value_format(a.axis_label_format, vmin);
         let label_max = render_value_format(a.axis_label_format, vmax);

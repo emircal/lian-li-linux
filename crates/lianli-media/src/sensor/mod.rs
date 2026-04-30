@@ -3,13 +3,13 @@ mod gauge;
 mod text;
 
 use crate::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
+use ab_glyph::FontVec;
 use gauge::{draw_gauge, GaugeParams};
 use image::{ImageBuffer, Rgb, RgbImage};
 use lianli_shared::media::{SensorDescriptor, SensorRange, SensorSourceConfig};
 use lianli_shared::screen::ScreenInfo;
 use lianli_shared::sensors::SensorInfo;
 use parking_lot::Mutex;
-use rusttype::Font;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -40,7 +40,7 @@ pub struct SensorAsset {
     value_font_size: f32,
     unit_font_size: f32,
     label_font_size: f32,
-    font: Option<Font<'static>>,
+    font: Option<FontVec>,
     template_image: Option<Arc<RgbImage>>,
     decimal_places: u8,
     value_offset: i32,
@@ -158,8 +158,8 @@ impl SensorAsset {
             let font_data = std::fs::read(&path)
                 .map_err(|e| MediaError::Sensor(format!("Failed to read font file: {e}")))?;
             Some(
-                Font::try_from_vec(font_data)
-                    .ok_or_else(|| MediaError::Sensor("Failed to parse font file".to_string()))?,
+                FontVec::try_from_vec(font_data)
+                    .map_err(|e| MediaError::Sensor(format!("Failed to parse font file: {e}")))?,
             )
         } else {
             None

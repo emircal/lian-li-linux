@@ -16,12 +16,13 @@ pub(super) mod speedometer;
 pub(super) mod value_text;
 pub(super) mod video_widget;
 
-use super::helpers::{resolve_font, widget_size_px, ElapsedMs};
+use super::helpers::{fast_resize_rgba, resolve_font, widget_size_px, ElapsedMs};
+use ab_glyph::FontVec;
+use fast_image_resize::FilterType as FirFilter;
 use image::{imageops, Rgba, RgbaImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use lianli_shared::sensors::ResolvedSensor;
 use lianli_shared::template::{Widget, WidgetKind};
-use rusttype::Font;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -104,8 +105,8 @@ pub(super) fn draw_widget(
     uniform_scale: f32,
     offset_x: i32,
     offset_y: i32,
-    fonts: &HashMap<PathBuf, Font<'static>>,
-    default_font: &Font<'static>,
+    fonts: &HashMap<PathBuf, FontVec>,
+    default_font: &FontVec,
     elapsed_ms: ElapsedMs,
     smooth_edges: bool,
 ) {
@@ -471,7 +472,7 @@ pub(super) fn draw_widget(
     }
 
     let sub = if ss_factor > 1 {
-        imageops::resize(&sub, ww, wh, imageops::FilterType::Triangle)
+        fast_resize_rgba(&sub, ww, wh, FirFilter::Bilinear)
     } else {
         sub
     };

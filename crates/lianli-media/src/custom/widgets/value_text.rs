@@ -2,17 +2,17 @@
 
 use super::super::helpers::{draw_text_widget, range_color, unit_interval};
 use super::WidgetState;
+use ab_glyph::FontVec;
 use image::RgbaImage;
 use lianli_shared::media::SensorRange;
 use lianli_shared::sensors::read_sensor_value;
 use lianli_shared::template::TextAlign;
-use rusttype::Font;
 
 #[allow(clippy::too_many_arguments)]
 pub(in super::super) fn draw(
     sub: &mut RgbaImage,
     state: &WidgetState,
-    font: &Font<'static>,
+    font: &FontVec,
     size: f32,
     color: [u8; 4],
     align: TextAlign,

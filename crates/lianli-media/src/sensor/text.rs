@@ -1,6 +1,6 @@
 use super::bitmap_glyphs::glyph_pattern;
+use ab_glyph::{point, Font, FontVec, PxScale, ScaleFont};
 use image::{Rgb, RgbImage};
-use rusttype::{point, Font, Scale};
 
 pub(super) struct TextRenderParams<'a> {
     pub label: &'a str,
@@ -20,7 +20,7 @@ pub(super) fn draw_sensor_text_ttf(
     width: u32,
     height: u32,
     params: TextRenderParams,
-    font: &Font,
+    font: &FontVec,
 ) {
     draw_text_centered(
         image,
@@ -62,37 +62,34 @@ fn draw_text_centered(
     size: f32,
     color: [u8; 3],
     offset_y: i32,
-    font: &Font,
+    font: &FontVec,
 ) {
     if size <= 0.0 || text.is_empty() {
         return;
     }
 
-    let scale = Scale::uniform(size);
-    let v_metrics = font.v_metrics(scale);
+    let scale = PxScale::from(size);
+    let scaled = font.as_scaled(scale);
 
-    let glyphs: Vec<_> = font
-        .layout(text, scale, point(0.0, v_metrics.ascent))
-        .collect();
+    let mut cursor_x = 0.0_f32;
+    let mut positioned: Vec<ab_glyph::Glyph> = Vec::with_capacity(text.len());
+    for ch in text.chars() {
+        let glyph_id = scaled.glyph_id(ch);
+        let glyph = glyph_id.with_scale_and_position(scale, point(cursor_x, scaled.ascent()));
+        positioned.push(glyph);
+        cursor_x += scaled.h_advance(glyph_id);
+    }
 
-    let text_width = glyphs
-        .iter()
-        .rev()
-        .filter_map(|g| {
-            g.pixel_bounding_box()
-                .map(|b| b.min.x as f32 + g.unpositioned().h_metrics().advance_width)
-        })
-        .next()
-        .unwrap_or(0.0);
-
+    let text_width = cursor_x;
     let start_x = ((width as f32 - text_width) / 2.0) as i32;
     let start_y = (height as i32 / 2) + offset_y;
 
-    for glyph in glyphs {
-        if let Some(bounding_box) = glyph.pixel_bounding_box() {
-            glyph.draw(|gx, gy, gv| {
-                let x = start_x + bounding_box.min.x + gx as i32;
-                let y = start_y + bounding_box.min.y + gy as i32;
+    for glyph in positioned {
+        if let Some(outlined) = scaled.outline_glyph(glyph) {
+            let bb = outlined.px_bounds();
+            outlined.draw(|gx, gy, gv| {
+                let x = start_x + bb.min.x as i32 + gx as i32;
+                let y = start_y + bb.min.y as i32 + gy as i32;
                 if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
                     let px = image.get_pixel_mut(x as u32, y as u32);
                     let alpha = gv;

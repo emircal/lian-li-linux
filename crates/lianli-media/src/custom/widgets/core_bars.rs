@@ -1,12 +1,12 @@
 //! Per-CPU-core usage bars.
 
 use super::super::helpers::range_color;
+use ab_glyph::{FontVec, PxScale};
 use image::{Rgba, RgbaImage};
 use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
 use lianli_shared::media::SensorRange;
 use lianli_shared::template::BarOrientation;
-use rusttype::{Font, Scale};
 
 #[allow(clippy::too_many_arguments)]
 pub(in super::super) fn draw(
@@ -17,7 +17,7 @@ pub(in super::super) fn draw(
     show_labels: bool,
     ranges: &[SensorRange],
     uniform_scale: f32,
-    font_digital7: &Font<'static>,
+    font_digital7: &FontVec,
 ) {
     let (w, h) = (sub.width(), sub.height());
     let bg = Rgba(background_color);
@@ -54,7 +54,7 @@ pub(in super::super) fn draw(
                         label_color,
                         x_start + 2,
                         (h as i32) - (10.0 * uniform_scale) as i32,
-                        Scale::uniform(9.0 * uniform_scale),
+                        PxScale::from(9.0 * uniform_scale),
                         font_digital7,
                         &label,
                     );
@@ -80,7 +80,7 @@ pub(in super::super) fn draw(
                         label_color,
                         2,
                         y_start,
-                        Scale::uniform(9.0 * uniform_scale),
+                        PxScale::from(9.0 * uniform_scale),
                         font_digital7,
                         &label,
                     );

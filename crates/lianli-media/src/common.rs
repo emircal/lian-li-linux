@@ -1,7 +1,7 @@
+use ab_glyph::{point, Font, FontVec, PxScale, ScaleFont};
 use image::imageops::{rotate180, rotate270, rotate90};
 use image::RgbImage;
 use lianli_shared::screen::ScreenInfo;
-use rusttype::{point, Font, Scale};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -96,51 +96,49 @@ pub fn apply_orientation(image: RgbImage, orientation: f32) -> RgbImage {
 /// But if you want the baseline of the text at box_y, you'll need to draw the text at y=box_y-ascent: So if you want to draw several characters each after another, you need to keep the baseline constant.
 /// If you draw a text at x/y, then the baseline will be at y+ascent. The topmost coord will be at y+oy and the bottommost coord will be y+oy+th-1. The text will NOT appear at x/y, as this coord is only the top left coord of the glyph (which in almost all cases starts with an offset).
 
-pub fn get_exact_text_metrics(font: &Font, text: &str, scale: Scale) -> (i32, i32, i32, i32, f32) {
-    let glyphs: Vec<_> = font.layout(text, scale, point(0.0, 0.0)).collect();
+pub fn get_exact_text_metrics(
+    font: &FontVec,
+    text: &str,
+    scale: PxScale,
+) -> (i32, i32, i32, i32, f32) {
+    let scaled = font.as_scaled(scale);
 
     let mut min_x = i32::MAX;
     let mut min_y = i32::MAX;
     let mut max_x = i32::MIN;
     let mut max_y = i32::MIN;
 
-    for glyph in glyphs {
-        if let Some(bb) = glyph.pixel_bounding_box() {
-            if bb.min.x < min_x {
-                min_x = bb.min.x;
+    let mut cursor_x = 0.0_f32;
+    for ch in text.chars() {
+        let glyph_id = scaled.glyph_id(ch);
+        let glyph = glyph_id.with_scale_and_position(scale, point(cursor_x, 0.0));
+        if let Some(outlined) = scaled.outline_glyph(glyph) {
+            let bb = outlined.px_bounds();
+            if (bb.min.x as i32) < min_x {
+                min_x = bb.min.x as i32;
             }
-            if bb.min.y < min_y {
-                min_y = bb.min.y;
+            if (bb.min.y as i32) < min_y {
+                min_y = bb.min.y as i32;
             }
-            if bb.max.x > max_x {
-                max_x = bb.max.x;
+            if (bb.max.x as i32) > max_x {
+                max_x = bb.max.x as i32;
             }
-            if bb.max.y > max_y {
-                max_y = bb.max.y;
+            if (bb.max.y as i32) > max_y {
+                max_y = bb.max.y as i32;
             }
         }
+        cursor_x += scaled.h_advance(glyph_id);
     }
 
     if max_x < min_x || max_y < min_y {
         return (0, 0, 0, 0, 0.0);
     }
 
-    // Width and height of the pixels actually occupied by the glyphs.
     let width = max_x - min_x;
     let height = max_y - min_y;
+    let ascent = scaled.ascent();
 
-    // min_x and min_y are the pixel offsets from the anchor point (0, 0).
-    // min_y is almost always negative for text (glyphs sit above the baseline).
-
-    let v_metrics = font.v_metrics(scale);
-
-    (
-        width,
-        height,
-        min_x,
-        (v_metrics.ascent as i32) + min_y,
-        v_metrics.ascent,
-    )
+    (width, height, min_x, (ascent as i32) + min_y, ascent)
 }
 
 pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [u8; 3] {

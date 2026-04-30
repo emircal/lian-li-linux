@@ -6,8 +6,8 @@ mod formatting;
 mod text;
 
 pub(super) use drawing::{
-    blit_with_opacity, draw_annulus, fill_rect_clipped_rounded, fill_rounded_rect, fit_image,
-    range_color, range_color_blended, unit_interval,
+    blit_with_opacity, draw_annulus, fast_resize_rgba, fill_rect_clipped_rounded,
+    fill_rounded_rect, fit_image, range_color, range_color_blended, unit_interval,
 };
 pub(super) use fonts::{load_font_from_disk, resolve_font, widget_font_refs};
 pub(super) use formatting::{format_sensor_readout, render_value_format};

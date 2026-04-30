@@ -1,3 +1,4 @@
+use fast_image_resize::{FilterType as FirFilter, ResizeAlg, ResizeOptions, Resizer};
 use image::imageops::FilterType;
 use image::{imageops, DynamicImage, Rgba, RgbaImage};
 use imageproc::drawing::draw_filled_rect_mut;
@@ -5,6 +6,19 @@ use imageproc::rect::Rect;
 use lianli_shared::media::SensorRange;
 use lianli_shared::template::ImageFit;
 use std::f32::consts::PI;
+
+pub fn fast_resize_rgba(src: &RgbaImage, w: u32, h: u32, filter: FirFilter) -> RgbaImage {
+    let mut dst = RgbaImage::new(w.max(1), h.max(1));
+    let mut resizer = Resizer::new();
+    resizer
+        .resize(
+            src,
+            &mut dst,
+            &ResizeOptions::new().resize_alg(ResizeAlg::Convolution(filter)),
+        )
+        .expect("fast_image_resize");
+    dst
+}
 
 pub fn fit_image(src: DynamicImage, target_w: u32, target_h: u32, fit: ImageFit) -> RgbaImage {
     match fit {

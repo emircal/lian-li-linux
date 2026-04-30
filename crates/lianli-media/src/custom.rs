@@ -11,6 +11,7 @@ mod widgets;
 use crate::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
 use crate::sensor::FrameInfo;
 use crate::video::decode_frames_to_rgba;
+use ab_glyph::FontVec;
 use helpers::{
     fit_image, format_sensor_readout, load_font_from_disk, resolve_sensor_source, widget_font_refs,
     widget_sensor_source, widget_size_px, ElapsedMs,
@@ -25,7 +26,6 @@ use lianli_shared::sensors::{read_sensor_value, SensorInfo};
 use lianli_shared::systeminfo::SysSensor;
 use lianli_shared::template::{LcdTemplate, TemplateBackground, WidgetKind};
 use parking_lot::Mutex;
-use rusttype::Font;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -69,8 +69,8 @@ pub struct CustomAsset {
     offset_y: i32,
     canonical_width: u32,
     canonical_height: u32,
-    fonts: HashMap<PathBuf, Font<'static>>,
-    default_font: Font<'static>,
+    fonts: HashMap<PathBuf, FontVec>,
+    default_font: FontVec,
     smooth_edges: bool,
     frame_index: AtomicUsize,
     start_instant: Instant,
@@ -99,7 +99,7 @@ impl CustomAsset {
             MediaError::Sensor("no system font available; install fontconfig or DejaVu Sans".into())
         })?;
         let default_font = load_font_from_disk(&default_path)?;
-        let mut fonts: HashMap<PathBuf, Font<'static>> = HashMap::new();
+        let mut fonts: HashMap<PathBuf, FontVec> = HashMap::new();
         for w in &template.widgets {
             for fr in widget_font_refs(&w.kind) {
                 if let Some(p) = &fr.path {
