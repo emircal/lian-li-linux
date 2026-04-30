@@ -17,16 +17,6 @@ use lianli_shared::media::SensorSourceConfig;
 use lianli_shared::sensors::{resolve_sensor, ResolvedSensor, SensorInfo};
 use lianli_shared::template::{Widget, WidgetKind};
 
-/// Monotonic elapsed-ms since asset creation, used for video playback timing.
-#[derive(Copy, Clone)]
-pub(super) struct ElapsedMs(pub u64);
-
-impl From<u64> for ElapsedMs {
-    fn from(v: u64) -> Self {
-        Self(v)
-    }
-}
-
 pub(super) fn widget_sensor_source(kind: &WidgetKind) -> Option<&SensorSourceConfig> {
     match kind {
         WidgetKind::ValueText { source, .. }

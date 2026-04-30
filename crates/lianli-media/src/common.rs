@@ -1,6 +1,6 @@
 use ab_glyph::{point, Font, FontVec, PxScale, ScaleFont};
 use image::imageops::{rotate180, rotate270, rotate90};
-use image::RgbImage;
+use image::{RgbImage, RgbaImage};
 use lianli_shared::screen::ScreenInfo;
 use thiserror::Error;
 
@@ -27,7 +27,7 @@ pub enum MediaError {
 }
 
 pub fn encode_jpeg(image: RgbImage, screen: &ScreenInfo) -> Result<Vec<u8>, MediaError> {
-    let final_image = apply_device_rotation(image, screen.device_rotation);
+    let final_image = apply_device_rotation_rgb(image, screen.device_rotation);
     let width = final_image.width() as usize;
     let height = final_image.height() as usize;
     let tj_image = turbojpeg::Image {
@@ -37,6 +37,27 @@ pub fn encode_jpeg(image: RgbImage, screen: &ScreenInfo) -> Result<Vec<u8>, Medi
         height,
         format: turbojpeg::PixelFormat::RGB,
     };
+    encode_compressed(tj_image, screen)
+}
+
+pub fn encode_jpeg_rgba(image: RgbaImage, screen: &ScreenInfo) -> Result<Vec<u8>, MediaError> {
+    let final_image = apply_device_rotation_rgba(image, screen.device_rotation);
+    let width = final_image.width() as usize;
+    let height = final_image.height() as usize;
+    let tj_image = turbojpeg::Image {
+        pixels: final_image.as_raw().as_slice(),
+        width,
+        pitch: width * 4,
+        height,
+        format: turbojpeg::PixelFormat::RGBA,
+    };
+    encode_compressed(tj_image, screen)
+}
+
+fn encode_compressed(
+    tj_image: turbojpeg::Image<&[u8]>,
+    screen: &ScreenInfo,
+) -> Result<Vec<u8>, MediaError> {
     let buf = turbojpeg::compress(
         tj_image,
         screen.jpeg_quality as i32,
@@ -50,7 +71,16 @@ pub fn encode_jpeg(image: RgbImage, screen: &ScreenInfo) -> Result<Vec<u8>, Medi
     Ok(buf)
 }
 
-fn apply_device_rotation(image: RgbImage, rotation: u16) -> RgbImage {
+fn apply_device_rotation_rgb(image: RgbImage, rotation: u16) -> RgbImage {
+    match rotation {
+        90 => rotate90(&image),
+        180 => rotate180(&image),
+        270 => rotate270(&image),
+        _ => image,
+    }
+}
+
+fn apply_device_rotation_rgba(image: RgbaImage, rotation: u16) -> RgbaImage {
     match rotation {
         90 => rotate90(&image),
         180 => rotate180(&image),
@@ -69,6 +99,27 @@ pub fn render_dimensions(screen: &ScreenInfo, orientation: f32) -> (u32, u32) {
 }
 
 pub fn apply_orientation(image: RgbImage, orientation: f32) -> RgbImage {
+    let norm = ((orientation % 360.0) + 360.0) % 360.0;
+    if (norm - 0.0).abs() < 0.5 || (norm - 360.0).abs() < 0.5 {
+        image
+    } else if (norm - 90.0).abs() < 0.5 {
+        rotate90(&image)
+    } else if (norm - 180.0).abs() < 0.5 {
+        rotate180(&image)
+    } else if (norm - 270.0).abs() < 0.5 {
+        rotate270(&image)
+    } else {
+        let nearest = ((norm + 45.0) / 90.0).floor() as i32 & 3;
+        match nearest {
+            1 => rotate90(&image),
+            2 => rotate180(&image),
+            3 => rotate270(&image),
+            _ => image,
+        }
+    }
+}
+
+pub fn apply_orientation_rgba(image: RgbaImage, orientation: f32) -> RgbaImage {
     let norm = ((orientation % 360.0) + 360.0) % 360.0;
     if (norm - 0.0).abs() < 0.5 || (norm - 360.0).abs() < 0.5 {
         image

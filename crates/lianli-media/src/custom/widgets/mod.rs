@@ -16,7 +16,7 @@ pub(super) mod speedometer;
 pub(super) mod value_text;
 pub(super) mod video_widget;
 
-use super::helpers::{fast_resize_rgba, resolve_font, widget_size_px, ElapsedMs};
+use super::helpers::{fast_resize_rgba, resolve_font, widget_size_px};
 use ab_glyph::FontVec;
 use fast_image_resize::FilterType as FirFilter;
 use image::{imageops, Rgba, RgbaImage};
@@ -33,7 +33,10 @@ pub(super) struct WidgetState {
     pub resolved_sensor: Option<ResolvedSensor>,
     pub loaded_image: Option<RgbaImage>,
     pub video_frames: Option<Arc<Vec<RgbaImage>>>,
-    pub video_frame_duration: Duration,
+    pub video_frame_durations: Option<Arc<Vec<Duration>>>,
+    pub video_total_ms: u64,
+    pub video_fps_cap_ms: Option<u64>,
+    pub last_video_render_ms: Option<u64>,
     pub last_render_text: Option<String>,
     pub last_quantized: i32,
     pub failed: AtomicBool,
@@ -54,7 +57,10 @@ impl WidgetState {
             resolved_sensor: None,
             loaded_image: None,
             video_frames: None,
-            video_frame_duration: Duration::from_millis(100),
+            video_frame_durations: None,
+            video_total_ms: 0,
+            video_fps_cap_ms: None,
+            last_video_render_ms: None,
             last_render_text: None,
             last_quantized: i32::MIN,
             failed: AtomicBool::new(false),
@@ -107,7 +113,6 @@ pub(super) fn draw_widget(
     offset_y: i32,
     fonts: &HashMap<PathBuf, FontVec>,
     default_font: &FontVec,
-    elapsed_ms: ElapsedMs,
     smooth_edges: bool,
 ) {
     let (ww, wh) = widget_size_px(widget, uniform_scale);
@@ -388,7 +393,7 @@ pub(super) fn draw_widget(
             image_widget::draw(&mut sub, state, *opacity);
         }
         WidgetKind::Video { opacity, .. } => {
-            video_widget::draw(&mut sub, state, *opacity, elapsed_ms);
+            video_widget::draw(&mut sub, state, *opacity);
         }
         WidgetKind::ClockDigital {
             format,

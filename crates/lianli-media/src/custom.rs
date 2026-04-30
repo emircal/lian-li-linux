@@ -8,16 +8,16 @@
 mod helpers;
 mod widgets;
 
-use crate::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
+use crate::common::{apply_orientation_rgba, encode_jpeg_rgba, render_dimensions, MediaError};
 use crate::sensor::FrameInfo;
 use crate::video::decode_frames_to_rgba;
 use ab_glyph::FontVec;
 use helpers::{
     fit_image, format_sensor_readout, load_font_from_disk, resolve_sensor_source, widget_font_refs,
-    widget_sensor_source, widget_size_px, ElapsedMs,
+    widget_sensor_source, widget_size_px,
 };
 use image::imageops::FilterType;
-use image::{imageops, ImageBuffer, Rgb, RgbImage, Rgba, RgbaImage};
+use image::{imageops, Rgba, RgbaImage};
 use imageproc::drawing::draw_filled_rect_mut;
 use imageproc::rect::Rect;
 use lianli_shared::fonts::default_font_path;
@@ -33,15 +33,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::warn;
 use widgets::{draw_widget, WidgetState};
-
-fn rgba_to_rgb(src: &RgbaImage) -> RgbImage {
-    let (w, h) = (src.width(), src.height());
-    let mut out = Vec::with_capacity((w * h * 3) as usize);
-    for px in src.as_raw().chunks_exact(4) {
-        out.extend_from_slice(&px[..3]);
-    }
-    ImageBuffer::from_raw(w, h, out).expect("rgb buffer dims match")
-}
 
 fn default_sample_interval(kind: &WidgetKind, explicit_ms: Option<u64>) -> Duration {
     let default_ms = match kind {
@@ -194,15 +185,19 @@ impl CustomAsset {
 
             if let WidgetKind::Video { path, .. } = &widget.kind {
                 let (ww, wh) = widget_size_px(widget, uniform_scale);
-                let fps = widget.fps.unwrap_or(30.0).max(1.0);
-                match decode_frames_to_rgba(path, fps, ww.max(1), wh.max(1)) {
+                let decode_fps = widget.fps.unwrap_or(30.0).max(1.0);
+                match decode_frames_to_rgba(path, decode_fps, ww.max(1), wh.max(1)) {
                     Ok((frames, durations)) => {
-                        let duration = durations
-                            .first()
-                            .copied()
-                            .unwrap_or(Duration::from_millis(33));
-                        state.video_frame_duration = duration;
+                        let total_ms: u64 = durations
+                            .iter()
+                            .map(|d| d.as_millis() as u64)
+                            .sum::<u64>()
+                            .max(1);
+                        state.video_total_ms = total_ms;
+                        state.video_frame_durations = Some(Arc::new(durations));
                         state.video_frames = Some(Arc::new(frames));
+                        state.video_fps_cap_ms =
+                            widget.fps.map(|fps| (1000.0 / fps.max(1.0)).round() as u64);
                     }
                     Err(e) => warn!(
                         "template '{}' widget '{}' video '{}' decode failed: {e}",
@@ -273,13 +268,13 @@ impl CustomAsset {
 
     pub fn blank_frame(&self) -> FrameInfo {
         let fill = match self.template.background {
-            TemplateBackground::Color { rgb } => Rgb([rgb[0], rgb[1], rgb[2]]),
-            TemplateBackground::Image { .. } => Rgb([0, 0, 0]),
+            TemplateBackground::Color { rgb } => Rgba([rgb[0], rgb[1], rgb[2], 255]),
+            TemplateBackground::Image { .. } => Rgba([0, 0, 0, 255]),
         };
-        let image = ImageBuffer::from_pixel(self.canonical_width, self.canonical_height, fill);
-        let oriented = apply_orientation(image, self.orientation);
+        let image = RgbaImage::from_pixel(self.canonical_width, self.canonical_height, fill);
+        let oriented = apply_orientation_rgba(image, self.orientation);
         FrameInfo {
-            data: encode_jpeg(oriented, &self.screen).unwrap_or_default(),
+            data: encode_jpeg_rgba(oriented, &self.screen).unwrap_or_default(),
             frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst),
         }
     }
@@ -362,12 +357,28 @@ impl CustomAsset {
                     }
                 }
                 WidgetKind::Video { .. } => {
-                    if let Some(frames) = &state.video_frames {
-                        if !frames.is_empty() {
-                            let dur_ms = state.video_frame_duration.as_millis().max(1) as u64;
-                            let idx = ((elapsed_ms / dur_ms) as usize) % frames.len();
-                            if state.last_video_frame_idx != Some(idx) {
+                    if let (Some(frames), Some(durs)) =
+                        (&state.video_frames, &state.video_frame_durations)
+                    {
+                        if !frames.is_empty() && state.video_total_ms > 0 {
+                            let cycle = elapsed_ms % state.video_total_ms;
+                            let mut acc = 0u64;
+                            let mut idx = frames.len() - 1;
+                            for (i, d) in durs.iter().enumerate() {
+                                acc += (d.as_millis() as u64).max(1);
+                                if cycle < acc {
+                                    idx = i;
+                                    break;
+                                }
+                            }
+                            let cap_ok = match (state.video_fps_cap_ms, state.last_video_render_ms)
+                            {
+                                (Some(cap), Some(prev)) => elapsed_ms.saturating_sub(prev) >= cap,
+                                _ => true,
+                            };
+                            if state.last_video_frame_idx != Some(idx) && cap_ok {
                                 state.last_video_frame_idx = Some(idx);
+                                state.last_video_render_ms = Some(elapsed_ms);
                                 state.last_sample_at = Some(now);
                                 any_dynamic_changed = true;
                             }
@@ -399,16 +410,15 @@ impl CustomAsset {
                 self.offset_y,
                 &self.fonts,
                 &self.default_font,
-                ElapsedMs::from(elapsed_ms),
                 self.smooth_edges,
             );
         }
         drop(states);
 
-        let rgb = rgba_to_rgb(&scratch);
+        let frame = scratch.clone();
         drop(scratch);
-        let oriented = apply_orientation(rgb, self.orientation);
-        let jpeg = encode_jpeg(oriented, &self.screen)?;
+        let oriented = apply_orientation_rgba(frame, self.orientation);
+        let jpeg = encode_jpeg_rgba(oriented, &self.screen)?;
 
         Ok(Some(FrameInfo {
             data: jpeg,
