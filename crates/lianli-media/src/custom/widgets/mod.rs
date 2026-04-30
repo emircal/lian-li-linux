@@ -43,6 +43,8 @@ pub(super) struct WidgetState {
     pub cached_core_usage: Vec<u32>,
     pub last_clock_key: Option<u64>,
     pub last_video_frame_idx: Option<usize>,
+    pub cached_render: Option<RgbaImage>,
+    pub cached_render_key: Option<u64>,
 }
 
 impl WidgetState {
@@ -62,15 +64,43 @@ impl WidgetState {
             cached_core_usage: Vec::new(),
             last_clock_key: None,
             last_video_frame_idx: None,
+            cached_render: None,
+            cached_render_key: None,
         }
     }
+}
+
+fn render_key(kind: &WidgetKind, state: &WidgetState) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    match kind {
+        WidgetKind::Label { .. } | WidgetKind::Image { .. } => 0u8.hash(&mut h),
+        WidgetKind::ValueText { .. }
+        | WidgetKind::RadialGauge { .. }
+        | WidgetKind::VerticalBar { .. }
+        | WidgetKind::HorizontalBar { .. }
+        | WidgetKind::Speedometer { .. } => state.last_quantized.hash(&mut h),
+        WidgetKind::Sparkline { .. } => {
+            state.history.len().hash(&mut h);
+            for v in &state.history {
+                v.to_bits().hash(&mut h);
+            }
+        }
+        WidgetKind::CoreBars { .. } => state.cached_core_usage.hash(&mut h),
+        WidgetKind::Video { .. } => state.last_video_frame_idx.hash(&mut h),
+        WidgetKind::ClockDigital { .. } | WidgetKind::ClockAnalog { .. } => {
+            state.last_clock_key.hash(&mut h)
+        }
+    }
+    h.finish()
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_widget(
     frame: &mut RgbaImage,
     widget: &Widget,
-    state: &WidgetState,
+    state: &mut WidgetState,
     uniform_scale: f32,
     offset_x: i32,
     offset_y: i32,
@@ -82,6 +112,18 @@ pub(super) fn draw_widget(
     let (ww, wh) = widget_size_px(widget, uniform_scale);
     if ww == 0 || wh == 0 {
         return;
+    }
+
+    let (ww_i, wh_i) = (ww as i32, wh as i32);
+    let tl_x = offset_x + (widget.x * uniform_scale).round() as i32 - ww_i / 2;
+    let tl_y = offset_y + (widget.y * uniform_scale).round() as i32 - wh_i / 2;
+
+    let key = render_key(&widget.kind, state);
+    if state.cached_render_key == Some(key) {
+        if let Some(cached) = &state.cached_render {
+            imageops::overlay(frame, cached, tl_x as i64, tl_y as i64);
+            return;
+        }
     }
 
     let supersamples = match &widget.kind {
@@ -97,7 +139,6 @@ pub(super) fn draw_widget(
     let ss = ss_factor as f32;
     let draw_w = ww * ss_factor;
     let draw_h = wh * ss_factor;
-    let base_scale = uniform_scale;
     let uniform_scale = uniform_scale * ss;
 
     let mut sub = RgbaImage::from_pixel(draw_w, draw_h, Rgba([0, 0, 0, 0]));
@@ -435,19 +476,18 @@ pub(super) fn draw_widget(
         sub
     };
 
-    let (ww_i, wh_i) = (ww as i32, wh as i32);
-    let tl_x = offset_x + (widget.x * base_scale).round() as i32 - ww_i / 2;
-    let tl_y = offset_y + (widget.y * base_scale).round() as i32 - wh_i / 2;
-
-    if widget.rotation.abs() > 0.5 {
-        let rotated = rotate_about_center(
+    let final_overlay = if widget.rotation.abs() > 0.5 {
+        rotate_about_center(
             &sub,
             widget.rotation.to_radians(),
             Interpolation::Bilinear,
             Rgba([0, 0, 0, 0]),
-        );
-        imageops::overlay(frame, &rotated, tl_x as i64, tl_y as i64);
+        )
     } else {
-        imageops::overlay(frame, &sub, tl_x as i64, tl_y as i64);
-    }
+        sub
+    };
+
+    imageops::overlay(frame, &final_overlay, tl_x as i64, tl_y as i64);
+    state.cached_render = Some(final_overlay);
+    state.cached_render_key = Some(key);
 }

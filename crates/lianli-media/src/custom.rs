@@ -371,7 +371,7 @@ impl CustomAsset {
         }
 
         let mut frame = self.template_image.clone();
-        for (widget, state) in self.template.widgets.iter().zip(states.iter()) {
+        for (widget, state) in self.template.widgets.iter().zip(states.iter_mut()) {
             if !widget.visible {
                 continue;
             }
