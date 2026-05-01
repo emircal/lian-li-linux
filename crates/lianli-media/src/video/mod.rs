@@ -1,7 +1,9 @@
 pub mod ffmpeg;
 pub mod h264;
+pub mod h264_live;
 
 pub use h264::encode_h264;
+pub use h264_live::LiveH264Encoder;
 
 use crate::common::{apply_orientation, encode_jpeg, render_dimensions, MediaError};
 use ffmpeg::{run_ffmpeg, run_ffmpeg_rgba};

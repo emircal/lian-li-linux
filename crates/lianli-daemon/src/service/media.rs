@@ -290,12 +290,16 @@ impl ServiceManager {
                             candidate.device_id,
                             device_cfg.orientation
                         );
+                        let screen =
+                            screen_info_for(candidate.family).unwrap_or(ScreenInfo::WIRELESS_LCD);
                         let target = ActiveTarget::new(
                             cfg_idx,
                             cfg_key,
                             candidate.device_id.clone(),
                             lcd,
                             Arc::clone(&asset),
+                            screen,
+                            device_cfg.custom_h264(),
                             self.tx.clone(),
                         );
                         new_targets.insert(cfg_idx, target);

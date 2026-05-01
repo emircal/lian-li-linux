@@ -198,37 +198,71 @@ impl WinUsbLcdDevice {
                 pos >= len
             };
 
-            let header = self.builder.start_play_header_winusb(n, is_last);
-            let mut packet = vec![0u8; 512 + n];
-            packet[..512].copy_from_slice(&header);
-            packet[512..512 + n].copy_from_slice(&file_buf[..n]);
-
-            match self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
-                Ok(_) => self.note_write_success(),
-                Err(e) => {
-                    warn!("H264 chunk write failed: {e}");
-                    self.try_recover()
-                        .with_context(|| format!("recovering from h264 write error: {e}"))?;
-                    self.transport
-                        .write(&packet, LCD_WRITE_TIMEOUT)
-                        .context("h264 chunk write after recovery")?;
-                    self.note_write_success();
-                }
-            }
-
-            let resp = self.read_response("h264 chunk", LCD_READ_TIMEOUT);
-
-            std::thread::sleep(Duration::from_millis(30));
-
-            if let Some(buf) = resp {
-                if buf[8] > 3 {
-                    self.wait_buffer(2);
-                }
-            }
+            self.send_h264_chunk(&file_buf[..n], is_last)?;
         }
 
         self.transport.read_flush();
         self.initialized = false;
+        Ok(())
+    }
+
+    /// Stream H264 NAL bytes from any reader (pipe, file, etc) via StartPlay (0x79)
+    pub fn stream_h264_reader(
+        &mut self,
+        reader: &mut dyn std::io::Read,
+        stop: &std::sync::atomic::AtomicBool,
+    ) -> Result<()> {
+        use std::sync::atomic::Ordering;
+
+        if !self.initialized {
+            self.do_init()?;
+        }
+
+        let mut buf = vec![0u8; Self::H264_CHUNK_SIZE];
+        loop {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            let n = reader.read(&mut buf).context("reading h264 chunk")?;
+            if n == 0 {
+                break;
+            }
+            self.send_h264_chunk(&buf[..n], false)?;
+        }
+
+        self.transport.read_flush();
+        self.initialized = false;
+        Ok(())
+    }
+
+    fn send_h264_chunk(&mut self, data: &[u8], is_last: bool) -> Result<()> {
+        let header = self.builder.start_play_header_winusb(data.len(), is_last);
+        let mut packet = vec![0u8; 512 + data.len()];
+        packet[..512].copy_from_slice(&header);
+        packet[512..512 + data.len()].copy_from_slice(data);
+
+        match self.transport.write(&packet, LCD_WRITE_TIMEOUT) {
+            Ok(_) => self.note_write_success(),
+            Err(e) => {
+                warn!("H264 chunk write failed: {e}");
+                self.try_recover()
+                    .with_context(|| format!("recovering from h264 write error: {e}"))?;
+                self.transport
+                    .write(&packet, LCD_WRITE_TIMEOUT)
+                    .context("h264 chunk write after recovery")?;
+                self.note_write_success();
+            }
+        }
+
+        let resp = self.read_response("h264 chunk", LCD_READ_TIMEOUT);
+
+        std::thread::sleep(Duration::from_millis(30));
+
+        if let Some(buf) = resp {
+            if buf[8] > 3 {
+                self.wait_buffer(2);
+            }
+        }
         Ok(())
     }
 

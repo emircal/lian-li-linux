@@ -241,6 +241,14 @@ impl CustomAsset {
         self.update_interval
     }
 
+    pub fn canvas_width(&self) -> u32 {
+        self.canonical_width
+    }
+
+    pub fn canvas_height(&self) -> u32 {
+        self.canonical_height
+    }
+
     pub fn seed_preview_history(&self) {
         let mut states = self.widget_states.lock();
         for (widget, state) in self.template.widgets.iter().zip(states.iter_mut()) {
@@ -280,6 +288,30 @@ impl CustomAsset {
     }
 
     pub fn render_frame(&self, force: bool) -> Result<Option<FrameInfo>, MediaError> {
+        match self.render_frame_rgba(force)? {
+            None => Ok(None),
+            Some(canvas) => {
+                let oriented = apply_orientation_rgba(canvas, self.orientation);
+                let jpeg = encode_jpeg_rgba(oriented, &self.screen)?;
+                Ok(Some(FrameInfo {
+                    data: jpeg,
+                    frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst),
+                }))
+            }
+        }
+    }
+
+    /// Total rotation (in degrees) the LCD expects on top of the rendered canvas:
+    /// the configured orientation plus the device's intrinsic rotation. Used by
+    /// the live h264 path so ffmpeg's filter chain can do the rotation instead
+    /// of paying for it on the CPU every frame.
+    pub fn total_rotation_deg(&self) -> u16 {
+        let total = (self.orientation as i32).rem_euclid(360);
+        let combined = (total + self.screen.device_rotation as i32).rem_euclid(360);
+        combined as u16
+    }
+
+    pub fn render_frame_rgba(&self, force: bool) -> Result<Option<RgbaImage>, MediaError> {
         let now = Instant::now();
         let elapsed_ms = now
             .saturating_duration_since(self.start_instant)
@@ -417,12 +449,6 @@ impl CustomAsset {
 
         let frame = scratch.clone();
         drop(scratch);
-        let oriented = apply_orientation_rgba(frame, self.orientation);
-        let jpeg = encode_jpeg_rgba(oriented, &self.screen)?;
-
-        Ok(Some(FrameInfo {
-            data: jpeg,
-            frame_index: self.frame_index.fetch_add(1, Ordering::SeqCst),
-        }))
+        Ok(Some(frame))
     }
 }

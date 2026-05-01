@@ -60,6 +60,12 @@ pub fn lcd_to_slint(
     let [r, g, b] = lcd.rgb.unwrap_or([0, 0, 0]);
     let serial_str = lcd.serial.as_deref().unwrap_or("");
     let device_label = lcd_serial_to_label(serial_str, devices);
+    let device_supports_h264 = devices
+        .iter()
+        .find(|d| d.serial.as_deref() == Some(serial_str))
+        .and_then(|d| lianli_shared::screen::screen_info_for(d.family))
+        .map(|s| s.h264)
+        .unwrap_or(false);
 
     crate::LcdEntryData {
         serial: SharedString::from(serial_str),
@@ -117,6 +123,8 @@ pub fn lcd_to_slint(
         template_name: SharedString::default(),
         template_preview: slint::Image::default(),
         smooth_edges: lcd.smooth_edges(),
+        custom_h264: lcd.custom_h264(),
+        device_supports_h264,
     }
 }
 

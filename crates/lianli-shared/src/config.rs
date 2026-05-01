@@ -39,11 +39,17 @@ pub struct LcdConfig {
     pub template_id: Option<String>,
     #[serde(default)]
     pub smooth_edges: Option<bool>,
+    #[serde(default)]
+    pub custom_h264: Option<bool>,
 }
 
 impl LcdConfig {
     pub fn smooth_edges(&self) -> bool {
         self.smooth_edges.unwrap_or(false)
+    }
+
+    pub fn custom_h264(&self) -> bool {
+        self.custom_h264.unwrap_or(true)
     }
 
     pub fn device_id(&self) -> String {

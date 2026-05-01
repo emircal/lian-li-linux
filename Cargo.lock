@@ -3097,6 +3097,7 @@ dependencies = [
  "image",
  "imageproc",
  "lianli-shared",
+ "libc",
  "parking_lot",
  "serde_json",
  "tempfile",

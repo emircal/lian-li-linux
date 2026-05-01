@@ -62,6 +62,8 @@ export struct LcdEntryData {
     template-name: string,
     template-preview: image,
     smooth-edges: bool,
+    custom-h264: bool,
+    device-supports-h264: bool,
 }
 
 component OrientationButton inherits Rectangle {
@@ -613,6 +615,17 @@ component LcdConfigCard inherits Card {
                 checked: root.lcd.smooth-edges;
                 toggled => {
                     root.update-field(root.index, "smooth_edges", self.checked ? "true" : "false");
+                }
+            }
+        }
+
+        if root.lcd.media-type == "Custom" && root.lcd.device-supports-h264: HorizontalLayout {
+            spacing: 8px;
+            CheckBox {
+                text: "Stream as H264 (uses less CPU)";
+                checked: root.lcd.custom-h264;
+                toggled => {
+                    root.update-field(root.index, "custom_h264", self.checked ? "true" : "false");
                 }
             }
         }

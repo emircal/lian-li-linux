@@ -33,20 +33,8 @@ pub fn encode_h264(
     let bitrate_str = format!("{bitrate}");
     let fps_str = fps_int.to_string();
 
-    let encoders: &[EncoderKind] = if hw_video_disabled() {
-        &[EncoderKind::Libx264]
-    } else {
-        &[
-            EncoderKind::Nvenc,
-            EncoderKind::Amf,
-            EncoderKind::Vaapi,
-            EncoderKind::Qsv,
-            EncoderKind::Libx264,
-        ]
-    };
-
     let mut last_stderr: Option<String> = None;
-    for kind in encoders {
+    for kind in encoder_chain() {
         match run_encode(input, &vf, &fps_str, &bitrate_str, *kind, &output) {
             Ok(()) => {
                 info!(
@@ -69,7 +57,7 @@ pub fn encode_h264(
 }
 
 #[derive(Debug, Clone, Copy)]
-enum EncoderKind {
+pub(super) enum EncoderKind {
     Nvenc,
     Amf,
     Vaapi,
@@ -78,7 +66,7 @@ enum EncoderKind {
 }
 
 impl EncoderKind {
-    fn name(&self) -> &'static str {
+    pub(super) fn name(&self) -> &'static str {
         match self {
             Self::Nvenc => "h264_nvenc",
             Self::Amf => "h264_amf",
@@ -89,60 +77,88 @@ impl EncoderKind {
     }
 }
 
-fn hw_video_disabled() -> bool {
+pub(super) fn hw_video_disabled() -> bool {
     std::env::var("LIANLI_DISABLE_HW_VIDEO")
         .map(|v| v != "0" && !v.is_empty())
         .unwrap_or(false)
 }
 
-fn run_encode(
-    input: &Path,
-    vf: &str,
-    fps_str: &str,
-    bitrate_str: &str,
-    kind: EncoderKind,
-    output: &Path,
-) -> Result<(), String> {
-    let mut args: Vec<String> = vec!["-y".into(), "-loglevel".into(), "error".into()];
+pub(super) fn encoder_chain() -> &'static [EncoderKind] {
+    if hw_video_disabled() {
+        &[EncoderKind::Libx264]
+    } else {
+        &[
+            EncoderKind::Nvenc,
+            EncoderKind::Amf,
+            EncoderKind::Vaapi,
+            EncoderKind::Qsv,
+            EncoderKind::Libx264,
+        ]
+    }
+}
 
+/// Pre-input flags that select the hardware context (or `-hwaccel auto` for sw decoders).
+pub(super) fn hwaccel_input_args(kind: EncoderKind) -> Vec<String> {
     match kind {
-        EncoderKind::Vaapi => {
-            args.extend([
-                "-vaapi_device".into(),
-                "/dev/dri/renderD128".into(),
-                "-hwaccel".into(),
-                "vaapi".into(),
-            ]);
-        }
-        EncoderKind::Qsv => {
-            args.extend([
-                "-init_hw_device".into(),
-                "qsv=qsv".into(),
-                "-filter_hw_device".into(),
-                "qsv".into(),
-                "-hwaccel".into(),
-                "qsv".into(),
-            ]);
-        }
+        EncoderKind::Vaapi => vec![
+            "-vaapi_device".into(),
+            "/dev/dri/renderD128".into(),
+            "-hwaccel".into(),
+            "vaapi".into(),
+        ],
+        EncoderKind::Qsv => vec![
+            "-init_hw_device".into(),
+            "qsv=qsv".into(),
+            "-filter_hw_device".into(),
+            "qsv".into(),
+            "-hwaccel".into(),
+            "qsv".into(),
+        ],
         _ => {
-            if !hw_video_disabled() {
-                args.extend(["-hwaccel".into(), "auto".into()]);
+            if hw_video_disabled() {
+                Vec::new()
+            } else {
+                vec!["-hwaccel".into(), "auto".into()]
             }
         }
     }
+}
 
-    args.extend(["-i".into(), input.to_string_lossy().into_owned()]);
-
-    // VAAPI/QSV need the filter chain to end by uploading NV12 frames to GPU surfaces.
-    let vf_final: String = match kind {
-        EncoderKind::Vaapi => format!("{vf},format=nv12,hwupload"),
-        EncoderKind::Qsv => format!("{vf},format=nv12,hwupload=extra_hw_frames=16"),
+/// Append the hwupload suffix to a -vf chain when the encoder needs frames on GPU surfaces.
+pub(super) fn finalize_vf(kind: EncoderKind, vf: &str) -> String {
+    match kind {
+        EncoderKind::Vaapi => {
+            if vf.is_empty() {
+                "format=nv12,hwupload".into()
+            } else {
+                format!("{vf},format=nv12,hwupload")
+            }
+        }
+        EncoderKind::Qsv => {
+            if vf.is_empty() {
+                "format=nv12,hwupload=extra_hw_frames=16".into()
+            } else {
+                format!("{vf},format=nv12,hwupload=extra_hw_frames=16")
+            }
+        }
         _ => vf.to_string(),
-    };
-    args.extend(["-vf".into(), vf_final]);
-    args.extend(["-r".into(), fps_str.into()]);
-    args.extend(["-c:v".into(), kind.name().into()]);
-    args.extend(["-b:v".into(), bitrate_str.into()]);
+    }
+}
+
+/// Codec, preset, tuning, and pix_fmt for the chosen encoder.
+pub(super) fn encoder_codec_args(
+    kind: EncoderKind,
+    fps_str: &str,
+    bitrate_str: &str,
+) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "-r".into(),
+        fps_str.into(),
+        "-c:v".into(),
+        kind.name().into(),
+        "-b:v".into(),
+        bitrate_str.into(),
+    ];
 
     match kind {
         EncoderKind::Nvenc => {
@@ -156,13 +172,16 @@ fn run_encode(
         }
         EncoderKind::Vaapi => {
             args.extend(["-rc_mode".into(), "VBR".into()]);
+            args.extend(["-bf".into(), "0".into()]);
         }
         EncoderKind::Qsv => {
             args.extend(["-preset".into(), "veryfast".into()]);
             args.extend(["-look_ahead".into(), "0".into()]);
+            args.extend(["-bf".into(), "0".into()]);
         }
         EncoderKind::Libx264 => {
             args.extend(["-preset".into(), "ultrafast".into()]);
+            args.extend(["-tune".into(), "zerolatency".into()]);
             args.extend(["-x264-params".into(), "bframes=0:no-scenecut=1".into()]);
         }
     }
@@ -173,6 +192,22 @@ fn run_encode(
         args.extend(["-pix_fmt".into(), "yuv420p".into()]);
     }
 
+    args
+}
+
+fn run_encode(
+    input: &Path,
+    vf: &str,
+    fps_str: &str,
+    bitrate_str: &str,
+    kind: EncoderKind,
+    output: &Path,
+) -> Result<(), String> {
+    let mut args: Vec<String> = vec!["-y".into(), "-loglevel".into(), "error".into()];
+    args.extend(hwaccel_input_args(kind));
+    args.extend(["-i".into(), input.to_string_lossy().into_owned()]);
+    args.extend(["-vf".into(), finalize_vf(kind, vf)]);
+    args.extend(encoder_codec_args(kind, fps_str, bitrate_str));
     args.extend([
         "-an".into(),
         "-t".into(),
