@@ -56,6 +56,10 @@ pub enum DaemonEvent {
     Unbind {
         mac_address: String,
     }, // MAC address pending wireless device unbind. Handled by main event loop.
+    SetEne6k77FanQuantity {
+        device_id: String,
+        quantity: u8,
+    },
     FrameFinished {
         asset: Arc<lianli_media::MediaAsset>,
     }, // A device has calculated a new frame, let's update the display
@@ -345,6 +349,12 @@ impl ServiceManager {
                     } else {
                         warn!("Invalid MAC address for unbind: {mac_str}");
                     }
+                }
+                DaemonEvent::SetEne6k77FanQuantity {
+                    device_id,
+                    quantity,
+                } => {
+                    self.handle_set_ene6k77_fan_quantity(&device_id, quantity);
                 }
                 DaemonEvent::IpcUpdate => {
                     // Check for IPC-triggered config reload

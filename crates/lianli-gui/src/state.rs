@@ -15,6 +15,7 @@ pub enum PendingAction {
     Bind,
     Unbind,
     SwitchDisplay,
+    SetFanQuantity,
 }
 
 impl PendingAction {
@@ -23,6 +24,7 @@ impl PendingAction {
             Self::Bind => "bind",
             Self::Unbind => "unbind",
             Self::SwitchDisplay => "switch",
+            Self::SetFanQuantity => "fan-quantity",
         }
     }
 }
@@ -65,6 +67,7 @@ impl SharedState {
                 PendingAction::Unbind | PendingAction::SwitchDisplay => {
                     devices.iter().any(|d| &d.device_id == key)
                 }
+                PendingAction::SetFanQuantity => false,
             }
         });
     }

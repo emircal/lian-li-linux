@@ -18,7 +18,7 @@ pub struct Ene6k77Controller {
     pid: u16,
     firmware: Option<Ene6k77Firmware>,
     /// Number of fans configured per group [group0, group1, group2, group3].
-    fan_quantities: [u8; 4],
+    fan_quantities: Mutex<[u8; 4]>,
 }
 
 impl Ene6k77Controller {
@@ -31,7 +31,7 @@ impl Ene6k77Controller {
             model,
             pid,
             firmware: None,
-            fan_quantities: [0; 4],
+            fan_quantities: Mutex::new([0; 4]),
         };
 
         ctrl.initialize()?;
@@ -61,9 +61,10 @@ impl Ene6k77Controller {
             }
         }
 
-        let max_fans = self.model.max_fans_per_group();
+        let max = self.model.max_fans_per_group();
+        let default_qty = 3u8.min(max);
         for group in 0..4u8 {
-            if let Err(e) = self.set_fan_quantity(group, max_fans) {
+            if let Err(e) = self.set_fan_quantity(group, default_qty) {
                 warn!("  Failed to set group {group} fan quantity: {e}");
             }
         }
@@ -86,7 +87,7 @@ impl Ene6k77Controller {
 
     /// Set fan quantity for a group. Tells the controller how many fans are
     /// connected, which affects RPM reporting accuracy.
-    pub fn set_fan_quantity(&mut self, group: u8, quantity: u8) -> Result<()> {
+    pub fn set_fan_quantity(&self, group: u8, quantity: u8) -> Result<()> {
         if group >= 4 {
             bail!("Group index {group} out of range (0-3)");
         }
@@ -101,15 +102,15 @@ impl Ene6k77Controller {
                 vec![REPORT_ID, 0x10, 0x60, group + 1, qty, 0x00]
             }
             Ene6k77Model::SlV2Fan | Ene6k77Model::SlV2aFan => {
-                vec![REPORT_ID, 0x10, 0x60, (group << 4) | (qty & 0x0F)]
+                vec![REPORT_ID, 0x10, 0x60, (group << 4) | (qty & 0x0F), 0x00, 0x00]
             }
             _ => {
-                vec![REPORT_ID, 0x10, 0x32, (group << 4) | (qty & 0x0F)]
+                vec![REPORT_ID, 0x10, 0x32, (group << 4) | (qty & 0x0F), 0x00, 0x00]
             }
         };
 
         self.send_feature(&cmd)?;
-        self.fan_quantities[group as usize] = qty;
+        self.fan_quantities.lock()[group as usize] = qty;
         debug!(
             "Set group {group} fan quantity to {qty} (model={})",
             self.model.name()
@@ -240,8 +241,8 @@ impl Ene6k77Controller {
             )?;
         }
 
-        // Commit frame to display changes
-        self.send_feature(&[REPORT_ID, 0x60, 0x00, 0x01])?;
+        let frame = self.model.frame_commit_value();
+        self.send_feature(&[REPORT_ID, 0x60, (frame >> 8) as u8, frame as u8])?;
         thread::sleep(CMD_DELAY);
 
         debug!(
@@ -260,42 +261,49 @@ impl Ene6k77Controller {
         dir: u8,
         brightness: u8,
     ) -> Result<()> {
-        let mut color_cmd = vec![REPORT_ID, 0x30 | port];
-        for color in effect.colors.iter().take(4) {
-            color_cmd.push(color[0]); // R
-            color_cmd.push(color[2]); // B
-            color_cmd.push(color[1]); // G
-        }
-        while color_cmd.len() < 14 {
-            color_cmd.push(0);
-        }
-        match self.send_output(&color_cmd) {
-            Ok(()) => debug!("Port {port}: wrote {} color bytes", color_cmd.len()),
-            Err(e) => warn!("Port {port}: color output report failed: {e}"),
-        }
+        let max_fans = self.model.max_fans_per_group() as usize;
+        let leds_per_fan = self.model.single_ring_leds_per_fan();
+        let palette = self.model.palette_size();
+
+        let colors = if matches!(effect.mode, RgbMode::Static | RgbMode::Breathing) {
+            expand_per_led(&effect.colors, max_fans, leds_per_fan)
+        } else {
+            expand_palette(&effect.colors, max_fans, palette)
+        };
+
+        self.send_color_setting(port, &colors)?;
         thread::sleep(CMD_DELAY);
         self.send_effect(port, mode, speed, dir, brightness)
     }
 
     fn send_ring_colors(&self, port: u8, effect: &RgbEffect, leds_per_fan: usize) -> Result<()> {
-        let mut color_cmd = vec![REPORT_ID, 0x30 | port];
-        let last_color = effect.colors.last().copied().unwrap_or([0, 0, 0]);
-        for i in 0..6usize {
-            let color = effect.colors.get(i).copied().unwrap_or(last_color);
-            for _ in 0..leds_per_fan {
-                color_cmd.push(color[0]); // R
-                color_cmd.push(color[2]); // B
-                color_cmd.push(color[1]); // G
-            }
+        let max_fans = self.model.max_fans_per_group() as usize;
+        let palette = self.model.palette_size();
+
+        let colors = if matches!(effect.mode, RgbMode::Static | RgbMode::Breathing) {
+            expand_per_led(&effect.colors, max_fans, leds_per_fan)
+        } else {
+            expand_palette(&effect.colors, max_fans, palette)
+        };
+
+        self.send_color_setting(port, &colors)?;
+        thread::sleep(CMD_DELAY);
+        Ok(())
+    }
+
+    fn send_color_setting(&self, port: u8, colors: &[[u8; 3]]) -> Result<()> {
+        let mut buf = Vec::with_capacity(2 + colors.len() * 3);
+        buf.push(REPORT_ID);
+        buf.push(0x30 | port);
+        for c in colors {
+            buf.push(c[0]); // R
+            buf.push(c[2]); // B
+            buf.push(c[1]); // G
         }
-        match self.send_output(&color_cmd) {
-            Ok(()) => debug!(
-                "Port {port}: wrote {} color bytes ({leds_per_fan} LEDs/fan)",
-                color_cmd.len()
-            ),
+        match self.send_output(&buf) {
+            Ok(()) => debug!("Port {port}: wrote {} color bytes", buf.len()),
             Err(e) => warn!("Port {port}: color output report failed: {e}"),
         }
-        thread::sleep(CMD_DELAY);
         Ok(())
     }
 
@@ -396,9 +404,8 @@ impl FanDevice for Ene6k77Controller {
     }
 
     fn fan_port_info(&self) -> Vec<(u8, u8)> {
-        (0..4)
-            .map(|g| (g, self.fan_quantities[g as usize].max(1)))
-            .collect()
+        let qtys = *self.fan_quantities.lock();
+        (0..4).map(|g| (g, qtys[g as usize])).collect()
     }
 
     fn per_fan_control(&self) -> bool {
@@ -426,6 +433,18 @@ impl FanDevice for Ene6k77Controller {
         debug!("Set group {group} MB RPM sync to {sync}");
         thread::sleep(CMD_DELAY);
         Ok(())
+    }
+
+    fn supports_fan_quantity(&self) -> bool {
+        true
+    }
+
+    fn max_fan_quantity_per_port(&self) -> u8 {
+        self.model.max_fans_per_group()
+    }
+
+    fn set_port_fan_quantity(&self, port: u8, quantity: u8) -> Result<()> {
+        self.set_fan_quantity(port, quantity)
     }
 }
 
@@ -456,4 +475,36 @@ impl FanDevice for Arc<Ene6k77Controller> {
     fn set_mb_rpm_sync(&self, port: u8, sync: bool) -> Result<()> {
         (**self).set_mb_rpm_sync(port, sync)
     }
+    fn supports_fan_quantity(&self) -> bool {
+        (**self).supports_fan_quantity()
+    }
+    fn max_fan_quantity_per_port(&self) -> u8 {
+        (**self).max_fan_quantity_per_port()
+    }
+    fn set_port_fan_quantity(&self, port: u8, quantity: u8) -> Result<()> {
+        (**self).set_port_fan_quantity(port, quantity)
+    }
+}
+
+fn expand_per_led(ui: &[[u8; 3]], num_fans: usize, leds_per_fan: usize) -> Vec<[u8; 3]> {
+    let fallback = ui.last().copied().unwrap_or([0, 0, 0]);
+    let mut out = vec![[0u8; 3]; num_fans * leds_per_fan];
+    for fan in 0..num_fans {
+        let c = ui.get(fan).copied().unwrap_or(fallback);
+        for led in 0..leds_per_fan {
+            out[fan * leds_per_fan + led] = c;
+        }
+    }
+    out
+}
+
+fn expand_palette(ui: &[[u8; 3]], num_fans: usize, palette: usize) -> Vec<[u8; 3]> {
+    let fallback = ui.last().copied().unwrap_or([0, 0, 0]);
+    let mut out = vec![[0u8; 3]; num_fans * palette];
+    for fan in 0..num_fans {
+        for slot in 0..palette {
+            out[fan * palette + slot] = ui.get(slot).copied().unwrap_or(fallback);
+        }
+    }
+    out
 }

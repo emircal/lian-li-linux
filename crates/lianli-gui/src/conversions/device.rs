@@ -89,6 +89,8 @@ pub fn device_to_slint(
         is_unbound_wireless: device.is_unbound_wireless,
         is_bound_wireless,
         pending_action: SharedString::from(pending),
+        fan_quantity: device.fan_quantity.unwrap_or(0) as i32,
+        max_fan_quantity: device.max_fan_quantity.unwrap_or(0) as i32,
     }
 }
 

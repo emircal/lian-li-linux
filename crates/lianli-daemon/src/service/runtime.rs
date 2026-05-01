@@ -618,13 +618,15 @@ impl AsyncCustomH264Renderer {
                     next_deadline = Instant::now() + frame_interval;
                 }
 
-                match asset.render_frame_rgba(true) {
-                    Ok(Some(rgba)) => {
-                        let mut enc = encoder_clone.lock();
-                        if let Err(e) = enc.write_frame(rgba.as_raw()) {
-                            warn!("custom h264 encoder write failed: {e}");
-                            break;
-                        }
+                let outcome = asset.render_frame_rgba_with(true, |rgba| {
+                    let mut enc = encoder_clone.lock();
+                    enc.write_frame(rgba)
+                });
+                match outcome {
+                    Ok(Some(Ok(()))) => {}
+                    Ok(Some(Err(e))) => {
+                        warn!("custom h264 encoder write failed: {e}");
+                        break;
                     }
                     Ok(None) => {}
                     Err(err) => {

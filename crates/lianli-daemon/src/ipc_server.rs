@@ -426,6 +426,17 @@ fn handle_request(
             }))
         }
 
+        IpcRequest::SetEne6k77FanQuantity { device_id, quantity } => {
+            tx.send(DaemonEvent::SetEne6k77FanQuantity {
+                device_id,
+                quantity,
+            })
+            .ok();
+            IpcResponse::ok(serde_json::json!({
+                "message": "Fan quantity update queued."
+            }))
+        }
+
         IpcRequest::GetLcdTemplates => {
             let state = state.lock();
             let sensors = lianli_shared::sensors::enumerate_sensors();

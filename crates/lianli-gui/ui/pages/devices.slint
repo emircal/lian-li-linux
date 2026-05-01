@@ -1,7 +1,7 @@
 import { Theme } from "../theme.slint";
 import { Badge } from "../widgets.slint";
 import { PageHeader } from "../page_header.slint";
-import { Button, ScrollView } from "std-widgets.slint";
+import { Button, ScrollView, SpinBox } from "std-widgets.slint";
 
 export struct DeviceData {
     device-id: string,
@@ -20,6 +20,8 @@ export struct DeviceData {
     is-unbound-wireless: bool,
     is-bound-wireless: bool,
     pending-action: string,
+    fan-quantity: int,
+    max-fan-quantity: int,
 }
 
 component DeviceCard inherits Rectangle {
@@ -27,6 +29,7 @@ component DeviceCard inherits Rectangle {
     callback switch-display-mode(string);
     callback bind-wireless-device(string);
     callback unbind-wireless-device(string);
+    callback set-fan-quantity(string, int);
 
     min-width: 280px;
     min-height: 190px;
@@ -96,6 +99,23 @@ component DeviceCard inherits Rectangle {
 
         Rectangle { vertical-stretch: 1; }
 
+        if device.max-fan-quantity > 0: HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: "Fans on this port:";
+                font-size: 12px;
+                color: Theme.text-secondary;
+                vertical-alignment: center;
+            }
+            SpinBox {
+                minimum: 0;
+                maximum: device.max-fan-quantity;
+                value: device.fan-quantity;
+                enabled: device.pending-action == "";
+                edited(val) => { root.set-fan-quantity(device.device-id, val); }
+            }
+        }
+
         if device.in-desktop-mode: Button {
             text: device.pending-action == "switch" ? "Switching…" : "Switch to LCD Mode";
             enabled: device.pending-action == "";
@@ -128,6 +148,7 @@ export component DevicesPage inherits VerticalLayout {
     callback switch-display-mode(string);
     callback bind-wireless-device(string);
     callback unbind-wireless-device(string);
+    callback set-fan-quantity(string, int);
 
     PageHeader {
         title: "Devices";
@@ -172,6 +193,7 @@ export component DevicesPage inherits VerticalLayout {
                     switch-display-mode(id) => { root.switch-display-mode(id); }
                     bind-wireless-device(id) => { root.bind-wireless-device(id); }
                     unbind-wireless-device(id) => { root.unbind-wireless-device(id); }
+                    set-fan-quantity(id, qty) => { root.set-fan-quantity(id, qty); }
                 }
             }
 

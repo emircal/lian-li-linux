@@ -253,6 +253,23 @@ impl ServiceManager {
             Ok(set) => {
                 if let Some(fan_ctrl) = set.fan {
                     info!("Opened {name} as fan device: {base_id}");
+                    let supports_quantity = fan_ctrl.supports_fan_quantity();
+                    let max_quantity = supports_quantity.then(|| fan_ctrl.max_fan_quantity_per_port());
+
+                    if supports_quantity {
+                        if let (Some(serial_str), Some(cfg)) = (serial, self.config.as_ref()) {
+                            if let Some(dev_cfg) = cfg.ene6k77.get(serial_str) {
+                                for (&port, &qty) in &dev_cfg.fan_quantities {
+                                    if let Err(e) = fan_ctrl.set_port_fan_quantity(port, qty) {
+                                        warn!(
+                                            "Failed to apply persisted fan quantity for {base_id} port {port}: {e}"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let ports = fan_ctrl.fan_port_info();
                     let per_fan = fan_ctrl.per_fan_control();
                     let mb_sync = fan_ctrl.supports_mb_sync();
@@ -288,6 +305,8 @@ impl ServiceManager {
                             screen_height: None,
                             is_unbound_wireless: false,
                             pump_rpm_range: None,
+                            fan_quantity: supports_quantity.then_some(fan_count),
+                            max_fan_quantity: max_quantity,
                         });
                     }
                     fan_devices.insert(base_id.to_string(), fan_ctrl);
@@ -304,6 +323,61 @@ impl ServiceManager {
             }
             Err(err) => warn!("Failed to init {name}: {err}"),
         }
+    }
+
+    pub(super) fn handle_set_ene6k77_fan_quantity(&mut self, device_id: &str, quantity: u8) {
+        let (base_id, port) = match device_id.rsplit_once(":port") {
+            Some((base, port_str)) => match port_str.parse::<u8>() {
+                Ok(p) => (base.to_string(), p),
+                Err(_) => {
+                    warn!("Invalid port suffix in device_id: {device_id}");
+                    return;
+                }
+            },
+            None => (device_id.to_string(), 0),
+        };
+
+        let serial = self
+            .wired_fan_device_info
+            .iter()
+            .find(|d| d.device_id == device_id)
+            .and_then(|d| d.serial.clone());
+
+        let Some(ctrl) = self.wired_fan_devices.get(&base_id) else {
+            warn!("Fan device not found for quantity update: {base_id}");
+            return;
+        };
+        if let Err(e) = ctrl.set_port_fan_quantity(port, quantity) {
+            warn!("Failed to set fan quantity for {device_id}: {e}");
+            return;
+        }
+
+        if let Some(serial) = serial {
+            if let Some(cfg) = self.config.as_mut() {
+                cfg.ene6k77
+                    .entry(serial)
+                    .or_default()
+                    .fan_quantities
+                    .insert(port, quantity);
+                let snapshot = cfg.clone();
+                if let Err(e) = ipc_server::write_config(&self.config_path, &snapshot) {
+                    warn!("Failed to persist ENE 6K77 fan quantity: {e}");
+                } else {
+                    self.ipc_state.lock().config = Some(snapshot);
+                }
+            }
+        }
+
+        for info in self.wired_fan_device_info.iter_mut() {
+            if info.device_id == device_id {
+                info.fan_count = Some(quantity);
+                info.fan_quantity = Some(quantity);
+                break;
+            }
+        }
+
+        info!("Set ENE 6K77 fan quantity: {device_id} → {quantity}");
+        self.device_poll();
     }
 
     /// Create the RgbController from pre-opened wired RGB devices + wireless.

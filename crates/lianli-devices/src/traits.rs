@@ -44,6 +44,22 @@ pub trait FanDevice: Send + Sync {
     fn set_pump_speed(&self, _duty: u8) -> Result<()> {
         anyhow::bail!("Pump speed control not supported by this device")
     }
+
+    /// Whether this device exposes a per-port daisy-chain "fan quantity" override.
+    fn supports_fan_quantity(&self) -> bool {
+        false
+    }
+
+    /// Maximum fan count per port for the quantity override (only meaningful
+    /// when `supports_fan_quantity()` is true).
+    fn max_fan_quantity_per_port(&self) -> u8 {
+        1
+    }
+
+    /// Set the per-port daisy-chain fan quantity.
+    fn set_port_fan_quantity(&self, _port: u8, _quantity: u8) -> Result<()> {
+        anyhow::bail!("Fan quantity override not supported by this device")
+    }
 }
 
 /// A device with an LCD screen.

@@ -59,6 +59,8 @@ impl ServiceManager {
                         screen_height: screen.map(|s| s.height),
                         is_unbound_wireless: false,
                         pump_rpm_range: None,
+                        fan_quantity: None,
+                        max_fan_quantity: None,
                     });
                 }
 
@@ -155,6 +157,8 @@ impl ServiceManager {
                 screen_height: None,
                 is_unbound_wireless: false,
                 pump_rpm_range: dev.fan_type.pump_rpm_range(),
+                fan_quantity: None,
+                max_fan_quantity: None,
             });
 
             // Update RPM telemetry keyed by device_id
@@ -216,6 +220,8 @@ impl ServiceManager {
                 screen_height: None,
                 is_unbound_wireless: true,
                 pump_rpm_range: dev.fan_type.pump_rpm_range(),
+                fan_quantity: None,
+                max_fan_quantity: None,
             });
         }
 

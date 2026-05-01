@@ -131,6 +131,12 @@ pub enum HidDriver {
     Rusb,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct Ene6k77DeviceConfig {
+    #[serde(default)]
+    pub fan_quantities: HashMap<u8, u8>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
     #[serde(default = "default_fps")]
@@ -148,6 +154,9 @@ pub struct AppConfig {
     /// Per-AIO configuration keyed by device_id (e.g. "wireless:AA:BB:CC:DD:EE:FF").
     #[serde(default)]
     pub aio: HashMap<String, AioConfig>,
+    /// Per-ENE 6K77 device configuration keyed by device serial.
+    #[serde(default)]
+    pub ene6k77: HashMap<String, Ene6k77DeviceConfig>,
 }
 
 impl Default for AppConfig {
@@ -160,6 +169,7 @@ impl Default for AppConfig {
             fans: None,
             rgb: None,
             aio: HashMap::new(),
+            ene6k77: HashMap::new(),
         }
     }
 }

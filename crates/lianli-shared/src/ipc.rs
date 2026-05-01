@@ -104,6 +104,11 @@ pub enum IpcRequest {
     UnbindWirelessDevice {
         mac: String,
     },
+    /// Override the daisy-chain fan quantity for an ENE 6K77 port.
+    SetEne6k77FanQuantity {
+        device_id: String,
+        quantity: u8,
+    },
     ListSensors,
     GetLcdTemplates,
     SetLcdTemplates {
@@ -191,6 +196,10 @@ pub struct DeviceInfo {
     /// Target pump RPM range (min, max) for wireless AIOs. None for non-AIO devices.
     #[serde(default)]
     pub pump_rpm_range: Option<(u32, u32)>,
+    #[serde(default)]
+    pub fan_quantity: Option<u8>,
+    #[serde(default)]
+    pub max_fan_quantity: Option<u8>,
 }
 
 /// Status of the OpenRGB SDK server.

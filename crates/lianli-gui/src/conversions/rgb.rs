@@ -1,4 +1,5 @@
 use lianli_shared::config::AppConfig;
+use lianli_shared::ipc::DeviceInfo;
 use lianli_shared::rgb::{RgbDeviceCapabilities, RgbMode, RgbScope};
 use slint::{ModelRc, SharedString, VecModel};
 
@@ -6,16 +7,34 @@ pub(super) fn rgb_mode_to_string(mode: &RgbMode) -> String {
     format!("{mode:?}")
 }
 
+fn is_empty_fan_port(cap: &RgbDeviceCapabilities, devices: &[DeviceInfo]) -> bool {
+    let Some((base, port)) = cap
+        .device_id
+        .rsplit_once(":group")
+        .or_else(|| cap.device_id.rsplit_once(":port"))
+    else {
+        return false;
+    };
+    let port_device_id = format!("{base}:port{port}");
+    devices
+        .iter()
+        .find(|d| d.device_id == port_device_id)
+        .map(|d| d.fan_count == Some(0))
+        .unwrap_or(false)
+}
+
 pub fn rgb_devices_to_model(
     capabilities: &[RgbDeviceCapabilities],
     config: &AppConfig,
     presets: &[lianli_shared::rgb::RgbPreset],
+    devices: &[DeviceInfo],
 ) -> ModelRc<crate::RgbDeviceData> {
     let rgb_config = config.rgb.as_ref();
     let device_configs = rgb_config.map(|r| &r.devices);
 
     let items: Vec<crate::RgbDeviceData> = capabilities
         .iter()
+        .filter(|cap| !is_empty_fan_port(cap, devices))
         .map(|cap| {
             let dev_cfg =
                 device_configs.and_then(|devs| devs.iter().find(|d| d.device_id == cap.device_id));

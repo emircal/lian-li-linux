@@ -101,6 +101,45 @@ fn main() {
         });
     }
 
+    // ── Set ENE 6K77 fan quantity (debounced) ──
+    {
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+        use std::rc::Rc;
+
+        let tx = backend.tx.clone();
+        let shared_inner = shared.clone();
+        let pending: Rc<RefCell<HashMap<String, i32>>> = Rc::new(RefCell::new(HashMap::new()));
+        let timer = Rc::new(slint::Timer::default());
+
+        window.on_set_fan_quantity(move |device_id, qty| {
+            shared_inner
+                .lock()
+                .unwrap()
+                .set_pending(device_id.to_string(), state::PendingAction::SetFanQuantity);
+            pending.borrow_mut().insert(device_id.to_string(), qty);
+
+            let pending_for_timer = pending.clone();
+            let tx_for_timer = tx.clone();
+            timer.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(400),
+                move || {
+                    let drained: Vec<_> = pending_for_timer.borrow_mut().drain().collect();
+                    for (device_id, qty) in drained {
+                        let _ = tx_for_timer.send(backend::BackendCommand::IpcRequest(
+                            lianli_shared::ipc::IpcRequest::SetEne6k77FanQuantity {
+                                device_id,
+                                quantity: qty.clamp(0, 255) as u8,
+                            },
+                        ));
+                    }
+                    let _ = tx_for_timer.send(backend::BackendCommand::RefreshDevices);
+                },
+            );
+        });
+    }
+
     // ── Save config ──
     {
         let tx = backend.tx.clone();
