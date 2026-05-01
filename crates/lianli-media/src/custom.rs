@@ -13,11 +13,11 @@ use crate::sensor::FrameInfo;
 use crate::video::decode_frames_to_rgba;
 use ab_glyph::FontVec;
 use helpers::{
-    fit_image, format_sensor_readout, load_font_from_disk, resolve_sensor_source, widget_font_refs,
-    widget_sensor_source, widget_size_px,
+    fast_overlay, fit_image, format_sensor_readout, load_font_from_disk, resolve_sensor_source,
+    widget_font_refs, widget_sensor_source, widget_size_px,
 };
 use image::imageops::FilterType;
-use image::{imageops, Rgba, RgbaImage};
+use image::{Rgba, RgbaImage};
 use imageproc::drawing::draw_filled_rect_mut;
 use imageproc::rect::Rect;
 use lianli_shared::fonts::default_font_path;
@@ -141,7 +141,7 @@ impl CustomAsset {
                     let resized = img
                         .resize_exact(scaled_w, scaled_h, FilterType::Lanczos3)
                         .to_rgba8();
-                    imageops::overlay(&mut composite, &resized, offset_x as i64, offset_y as i64);
+                    fast_overlay(&mut composite, &resized, offset_x as i64, offset_y as i64);
                 }
                 Err(e) => warn!(
                     "template '{}' background image '{}' failed to load: {e}",

@@ -16,10 +16,10 @@ pub(super) mod speedometer;
 pub(super) mod value_text;
 pub(super) mod video_widget;
 
-use super::helpers::{fast_resize_rgba, resolve_font, widget_size_px};
+use super::helpers::{fast_overlay, fast_resize_rgba, resolve_font, widget_size_px};
 use ab_glyph::FontVec;
 use fast_image_resize::FilterType as FirFilter;
-use image::{imageops, Rgba, RgbaImage};
+use image::{Rgba, RgbaImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use lianli_shared::sensors::ResolvedSensor;
 use lianli_shared::template::{Widget, WidgetKind};
@@ -127,7 +127,7 @@ pub(super) fn draw_widget(
     let key = render_key(&widget.kind, state);
     if state.cached_render_key == Some(key) {
         if let Some(cached) = &state.cached_render {
-            imageops::overlay(frame, cached, tl_x as i64, tl_y as i64);
+            fast_overlay(frame, cached, tl_x as i64, tl_y as i64);
             return;
         }
     }
@@ -493,7 +493,7 @@ pub(super) fn draw_widget(
         sub
     };
 
-    imageops::overlay(frame, &final_overlay, tl_x as i64, tl_y as i64);
+    fast_overlay(frame, &final_overlay, tl_x as i64, tl_y as i64);
     state.cached_render = Some(final_overlay);
     state.cached_render_key = Some(key);
 }

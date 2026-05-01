@@ -1,6 +1,6 @@
 //! Analog clock with configurable face, ticks, numbers, and three hands.
 
-use super::super::helpers::draw_text_widget;
+use super::super::helpers::{draw_text_widget, fast_overlay};
 use ab_glyph::FontVec;
 use chrono::{Local, Timelike};
 use image::{Rgba, RgbaImage};
@@ -100,7 +100,7 @@ pub(in super::super) fn draw(
                 box_h,
                 0.0,
             );
-            image::imageops::overlay(sub, &glyph_canvas, tl_x as i64, tl_y as i64);
+            fast_overlay(sub, &glyph_canvas, tl_x as i64, tl_y as i64);
         }
     }
 

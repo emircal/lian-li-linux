@@ -1,6 +1,6 @@
 use fast_image_resize::{FilterType as FirFilter, ResizeAlg, ResizeOptions, Resizer};
 use image::imageops::FilterType;
-use image::{imageops, DynamicImage, Rgba, RgbaImage};
+use image::{DynamicImage, Rgba, RgbaImage};
 use imageproc::drawing::draw_filled_rect_mut;
 use imageproc::rect::Rect;
 use lianli_shared::media::SensorRange;
@@ -32,7 +32,7 @@ pub fn fit_image(src: DynamicImage, target_w: u32, target_h: u32, fit: ImageFit)
             let rgba = resized.to_rgba8();
             let ox = ((target_w as i32) - (rgba.width() as i32)) / 2;
             let oy = ((target_h as i32) - (rgba.height() as i32)) / 2;
-            imageops::overlay(&mut canvas, &rgba, ox as i64, oy as i64);
+            fast_overlay(&mut canvas, &rgba, ox as i64, oy as i64);
             canvas
         }
         ImageFit::Cover => {
@@ -260,13 +260,82 @@ pub fn fill_rect_clipped_rounded(
     }
 }
 
+pub fn fast_overlay(dst: &mut RgbaImage, src: &RgbaImage, tl_x: i64, tl_y: i64) {
+    let dw = dst.width() as i64;
+    let dh = dst.height() as i64;
+    let sw = src.width() as i64;
+    let sh = src.height() as i64;
+
+    let dx0 = tl_x.max(0);
+    let dy0 = tl_y.max(0);
+    let dx1 = (tl_x + sw).min(dw);
+    let dy1 = (tl_y + sh).min(dh);
+    if dx0 >= dx1 || dy0 >= dy1 {
+        return;
+    }
+
+    let copy_w = (dx1 - dx0) as usize;
+    let dst_stride = dst.width() as usize * 4;
+    let src_stride = src.width() as usize * 4;
+    let dst_x0_bytes = dx0 as usize * 4;
+    let src_x0_bytes = (dx0 - tl_x) as usize * 4;
+    let row_bytes = copy_w * 4;
+    let dst_buf: &mut [u8] = dst.as_mut();
+    let src_buf: &[u8] = src.as_raw();
+
+    for dy in dy0..dy1 {
+        let sy = (dy - tl_y) as usize;
+        let dst_row = &mut dst_buf
+            [dy as usize * dst_stride + dst_x0_bytes..dy as usize * dst_stride + dst_x0_bytes + row_bytes];
+        let src_row =
+            &src_buf[sy * src_stride + src_x0_bytes..sy * src_stride + src_x0_bytes + row_bytes];
+
+        for (dpx, spx) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+            let sa = spx[3] as u32;
+            if sa == 0 {
+                continue;
+            }
+            if sa == 255 {
+                dpx[0] = spx[0];
+                dpx[1] = spx[1];
+                dpx[2] = spx[2];
+                dpx[3] = 255;
+                continue;
+            }
+            let inv = 255 - sa;
+            let da = dpx[3] as u32;
+            let sr = spx[0] as u32;
+            let sg = spx[1] as u32;
+            let sb = spx[2] as u32;
+            let dr = dpx[0] as u32;
+            let dg = dpx[1] as u32;
+            let db = dpx[2] as u32;
+            if da == 255 {
+                dpx[0] = ((sr * sa + dr * inv + 127) / 255) as u8;
+                dpx[1] = ((sg * sa + dg * inv + 127) / 255) as u8;
+                dpx[2] = ((sb * sa + db * inv + 127) / 255) as u8;
+            } else {
+                let denom = sa * 255 + da * inv;
+                if denom == 0 {
+                    continue;
+                }
+                let half = denom / 2;
+                dpx[0] = ((sa * sr * 255 + da * inv * dr + half) / denom) as u8;
+                dpx[1] = ((sa * sg * 255 + da * inv * dg + half) / denom) as u8;
+                dpx[2] = ((sa * sb * 255 + da * inv * db + half) / denom) as u8;
+                dpx[3] = ((denom + 127) / 255) as u8;
+            }
+        }
+    }
+}
+
 pub fn blit_with_opacity(dst: &mut RgbaImage, src: &RgbaImage, opacity: f32) {
     let o = opacity.clamp(0.0, 1.0);
     if o <= 0.0 {
         return;
     }
-    if o >= 0.999 && src.width() == dst.width() && src.height() == dst.height() {
-        imageops::overlay(dst, src, 0, 0);
+    if o >= 0.999 {
+        fast_overlay(dst, src, 0, 0);
         return;
     }
     let (dw, dh) = (dst.width(), dst.height());
