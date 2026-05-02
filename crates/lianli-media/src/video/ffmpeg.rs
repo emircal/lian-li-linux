@@ -34,14 +34,17 @@ pub(super) fn run_ffmpeg(
         "4".into(),
         output_pattern.to_str().unwrap().into(),
     ]);
-    let status = Command::new("ffmpeg")
+    let output = Command::new("ffmpeg")
         .args(&args)
-        .status()
+        .output()
         .map_err(MediaError::Io)?;
 
-    if !status.success() {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(MediaError::Ffmpeg(format!(
-            "ffmpeg exited with status {status}"
+            "ffmpeg exited with status {}: {}",
+            output.status,
+            stderr.trim()
         )));
     }
 
@@ -69,14 +72,17 @@ pub(super) fn run_ffmpeg_rgba(
         "rgba".into(),
         output_pattern.to_str().unwrap().into(),
     ]);
-    let status = Command::new("ffmpeg")
+    let output = Command::new("ffmpeg")
         .args(&args)
-        .status()
+        .output()
         .map_err(MediaError::Io)?;
 
-    if !status.success() {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(MediaError::Ffmpeg(format!(
-            "ffmpeg exited with status {status}"
+            "ffmpeg exited with status {}: {}",
+            output.status,
+            stderr.trim()
         )));
     }
 

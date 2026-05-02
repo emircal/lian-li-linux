@@ -3,9 +3,12 @@ use super::h264::{
 };
 use crate::common::MediaError;
 use lianli_shared::screen::ScreenInfo;
+use parking_lot::Mutex;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::io::AsRawFd;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -72,7 +75,7 @@ impl LiveH264Encoder {
                     return Ok(child);
                 }
                 Err(e) => {
-                    debug!("live H.264 encoder {} unavailable: {e}", kind.name());
+                    warn!("h264 encoder {} unavailable, trying next: {e}", kind.name());
                     last_err = Some(e);
                 }
             }
@@ -192,7 +195,7 @@ fn try_spawn(
         ));
     }
 
-    let stdin = child
+    let mut stdin = child
         .stdin
         .take()
         .ok_or_else(|| "ffmpeg stdin missing".to_string())?;
@@ -200,25 +203,85 @@ fn try_spawn(
         .stdout
         .take()
         .ok_or_else(|| "ffmpeg stdout missing".to_string())?;
-    if let Some(stderr) = child.stderr.take() {
-        let kind_name = kind.name();
-        thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines().map_while(Result::ok) {
-                if !line.is_empty() {
-                    warn!("ffmpeg[{kind_name}]: {line}");
-                }
-            }
-        });
-    }
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "ffmpeg stderr missing".to_string())?;
 
-    // Width/height parsed back out of size_str so frame_bytes matches.
     let (w, h) = size_str
         .split_once('x')
         .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
         .ok_or_else(|| format!("bad size_str {size_str}"))?;
     let frame_bytes = (w as usize) * (h as usize) * 4;
     grow_pipe(stdin.as_raw_fd(), frame_bytes);
+
+    let probing = Arc::new(AtomicBool::new(true));
+    let open_failed = Arc::new(AtomicBool::new(false));
+    let probe_log: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let probing_clone = Arc::clone(&probing);
+    let open_failed_clone = Arc::clone(&open_failed);
+    let probe_log_clone = Arc::clone(&probe_log);
+    let kind_name = kind.name();
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            if line.is_empty() {
+                continue;
+            }
+            if probing_clone.load(Ordering::Relaxed) {
+                if line.contains("Error while opening encoder")
+                    || line.contains("Could not open encoder")
+                    || line.contains("Failed to initialise")
+                    || line.contains("Device creation failed")
+                {
+                    open_failed_clone.store(true, Ordering::Relaxed);
+                }
+                probe_log_clone.lock().push(line);
+            } else {
+                warn!("ffmpeg[{kind_name}]: {line}");
+            }
+        }
+    });
+
+    let probe = vec![0u8; frame_bytes];
+    if let Err(e) = stdin.write_all(&probe) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("probe write: {e}"));
+    }
+
+    let probe_deadline = Instant::now() + Duration::from_millis(2000);
+    loop {
+        if open_failed.load(Ordering::Relaxed) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let summary = probe_log
+                .lock()
+                .iter()
+                .find(|l| {
+                    !l.contains("Task finished")
+                        && !l.contains("Terminating thread")
+                        && !l.contains("Nothing was written")
+                })
+                .cloned()
+                .unwrap_or_else(|| format!("{kind_name} encoder open failed"));
+            return Err(summary);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return Err(format!("ffmpeg exited during probe ({status})"));
+            }
+            Ok(None) => {
+                if Instant::now() >= probe_deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("try_wait: {e}")),
+        }
+    }
+
+    probing.store(false, Ordering::Relaxed);
 
     Ok(LiveH264Encoder {
         child,
