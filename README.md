@@ -166,8 +166,9 @@ sudo udevadm trigger
 
 5) Install and start the daemon:
 ```bash
-# Copy binary
+# Copy binaries
 sudo install -Dm755 target/release/lianli-daemon /usr/bin/lianli-daemon
+sudo install -Dm755 target/release/lianli-gui /usr/bin/lianli-gui
 
 # Install user service
 sudo install -Dm644 packaging/systemd/lianli-daemon.service /usr/lib/systemd/user/lianli-daemon.service
@@ -181,10 +182,8 @@ systemctl --user enable --now lianli-daemon.service
 
 A default config is created automatically at `~/.config/lianli/config.json` on first run.
 
-6) Install the GUI (optional):
+6) Install desktop entry and icons:
 ```bash
-cp target/release/lianli-gui ~/.local/bin/
-
 # Install icons
 for size in 32x32 128x128 256x256 scalable; do mkdir -p ~/.local/share/icons/hicolor/$size/apps; done
 cp assets/icons/32x32.png ~/.local/share/icons/hicolor/32x32/apps/com.sgtaziz.lianlilinux.png
