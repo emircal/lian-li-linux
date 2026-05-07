@@ -502,7 +502,6 @@ fn handle_request(
                 max_fps: 30,
                 jpeg_quality: 90,
                 max_payload: 4 * 1024 * 1024,
-                device_rotation: 0,
                 h264: false,
             };
             let all_sensors = lianli_shared::sensors::enumerate_sensors();
