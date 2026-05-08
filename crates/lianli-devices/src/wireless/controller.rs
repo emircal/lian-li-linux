@@ -28,6 +28,7 @@ pub struct WirelessController {
     /// 0xFFFF means unavailable/not yet read.
     pub(super) mobo_pwm: Arc<AtomicU16>,
     pub(super) tx_failures: Arc<AtomicU32>,
+    pub(super) desired_effects: Arc<Mutex<std::collections::HashMap<[u8; 6], [u8; 4]>>>,
 }
 
 impl Clone for WirelessController {
@@ -43,6 +44,7 @@ impl Clone for WirelessController {
             discovered_devices: Arc::clone(&self.discovered_devices),
             mobo_pwm: Arc::clone(&self.mobo_pwm),
             tx_failures: Arc::clone(&self.tx_failures),
+            desired_effects: Arc::clone(&self.desired_effects),
         }
     }
 }
@@ -60,6 +62,7 @@ impl WirelessController {
             discovered_devices: Arc::new(Mutex::new(Vec::new())),
             mobo_pwm: Arc::new(AtomicU16::new(0xFFFF)),
             tx_failures: Arc::new(AtomicU32::new(0)),
+            desired_effects: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -388,6 +391,21 @@ impl WirelessController {
 
     pub fn is_connected(&self) -> bool {
         self.tx.is_some() && self.tx_failures.load(Ordering::Relaxed) < TX_FAILURE_THRESHOLD
+    }
+
+    /// Returns true if any wireless device's currently-running effect_index
+    /// drifted away from what we last sent. Indicates the device firmware
+    /// reset its lighting state (e.g. idle watchdog) and we should re-apply.
+    pub fn rgb_drifted(&self) -> bool {
+        let desired = self.desired_effects.lock();
+        if desired.is_empty() {
+            return false;
+        }
+        let devices = self.discovered_devices.lock();
+        devices.iter().any(|d| match desired.get(&d.mac) {
+            Some(want) => d.effect_index != *want,
+            None => false,
+        })
     }
 
     pub(super) fn tx_recover<F, R>(&self, op: F) -> Result<R>

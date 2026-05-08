@@ -143,6 +143,10 @@ impl WirelessController {
             Ok(())
         })?;
 
+        self.desired_effects
+            .lock()
+            .insert(device.mac, *effect_index);
+
         debug!(
             "Sent RGB to {} ({} frame(s), {} LEDs, {} compressed, {} packets, {}ms interval)",
             device.mac_str(),

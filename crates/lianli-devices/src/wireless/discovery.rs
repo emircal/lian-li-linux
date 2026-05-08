@@ -27,6 +27,10 @@ pub struct DiscoveredDevice {
     pub list_index: u8,
     /// Coolant temperature in °C (WaterBlock/WaterBlock2 only, from byte 27)
     pub coolant_temp_c: Option<u8>,
+    /// Effect index the device firmware is currently running. Drifts to
+    /// device-default if the firmware resets idle; compare against the desired
+    /// effect_index to detect that and re-send the RGB packet.
+    pub effect_index: [u8; 4],
 }
 
 impl DiscoveredDevice {
@@ -157,6 +161,9 @@ pub(super) fn parse_device_record(data: &[u8], list_index: u8) -> Option<Discove
         None
     };
 
+    let mut effect_index = [0u8; 4];
+    effect_index.copy_from_slice(&data[20..24]);
+
     Some(DiscoveredDevice {
         mac,
         master_mac,
@@ -171,6 +178,7 @@ pub(super) fn parse_device_record(data: &[u8], list_index: u8) -> Option<Discove
         fan_type,
         list_index,
         coolant_temp_c,
+        effect_index,
     })
 }
 

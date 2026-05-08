@@ -47,7 +47,13 @@ impl ServiceManager {
             wired_devices.len()
         );
 
-        let mut controller = FanController::new(fan_config, fan_curves, wireless, wired_devices);
+        let mut controller = FanController::new(
+            fan_config,
+            fan_curves,
+            wireless,
+            wired_devices,
+            self.tx.clone(),
+        );
         controller.start();
         self.fan_controller = Some(controller);
     }

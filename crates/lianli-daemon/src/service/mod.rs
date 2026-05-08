@@ -66,6 +66,7 @@ pub enum DaemonEvent {
     RecreateMedia {
         target_index: usize,
     },
+    ResyncWirelessRgb,
     Shutdown, // SIGINT/SIGTERM received, exit the event loop cleanly
 }
 
@@ -415,6 +416,10 @@ impl ServiceManager {
                 DaemonEvent::FrameFinished { asset } => {
                     // which worker has a new image to send?
                     self.stream_target(asset);
+                }
+                DaemonEvent::ResyncWirelessRgb => {
+                    info!("Wireless RGB drift detected, re-applying config");
+                    self.apply_rgb_config();
                 }
                 DaemonEvent::RecreateMedia { target_index } => {
                     if let Some(asset) = self.media_assets.get(&target_index).cloned() {
