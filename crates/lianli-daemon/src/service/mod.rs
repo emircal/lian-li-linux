@@ -86,6 +86,7 @@ pub struct ServiceManager {
     /// Shared HID backends keyed by device ID — allows fan, RGB, and LCD
     /// controllers for the same physical device to share one USB handle.
     hid_backends: HashMap<String, Arc<Mutex<HidBackend>>>,
+    last_wired_hid_ids: std::collections::HashSet<String>,
     /// Cached USB device list from enumerate_devices() — refreshed every USB_ENUM_INTERVAL.
     cached_usb_devices: Vec<DeviceInfo>,
     /// Firmware string + C-command capability per AIO LCD device_id, populated
@@ -125,6 +126,7 @@ impl ServiceManager {
             wired_fan_device_info: Vec::new(),
             wired_fan_devices: Arc::new(HashMap::new()),
             hid_backends: HashMap::new(),
+            last_wired_hid_ids: std::collections::HashSet::new(),
             cached_usb_devices: Vec::new(),
             aio_lcd_info: HashMap::new(),
             last_wireless_count: 0,
@@ -225,6 +227,7 @@ impl ServiceManager {
             self.last_wireless_count = current_wireless;
         }
 
+        self.check_wired_hotplug();
         self.refresh_targets();
         self.sync_ipc_telemetry();
     }
