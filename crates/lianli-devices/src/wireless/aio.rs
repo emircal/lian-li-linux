@@ -1,10 +1,9 @@
 use super::controller::WirelessController;
 use super::discovery::DiscoveredDevice;
 use super::fan_type::WirelessFanType;
-use super::transport::with_transport_recovery;
 use super::{
     AIO_PARAM_LEN, AIO_PIC_MAX_BYTES, RF_AIO_PARAMS, RF_AIO_PIC, RF_AIO_SWITCH_WIRELESS, RF_CHUNKS,
-    RF_CHUNK_SIZE, RF_DATA_SIZE, RF_SELECT, TX_IDS, USB_CMD_SEND_RF,
+    RF_CHUNK_SIZE, RF_DATA_SIZE, RF_SELECT, USB_CMD_SEND_RF,
 };
 use anyhow::{bail, Context, Result};
 use lianli_transport::usb::{UsbTransport, USB_TIMEOUT};
@@ -17,7 +16,6 @@ impl WirelessController {
     /// Must be sent once per AIO MAC after discovery, before the first `set_aio_params`.
     /// Idempotent — safe to re-invoke on reconnects.
     pub fn switch_to_wireless_theme(&self, mac: &[u8; 6]) -> Result<()> {
-        let tx = self.tx.as_ref().context("TX device not connected")?;
         let device = self.device_by_mac_snapshot(mac)?;
         let master_mac = *self.master_mac.lock();
         let master_ch = *self.master_channel.lock();
@@ -30,7 +28,7 @@ impl WirelessController {
         rf_data[14] = device.rx_type;
         rf_data[15] = master_ch;
 
-        with_transport_recovery(tx, &TX_IDS, "TX", |handle| {
+        self.tx_recover(|handle| {
             for _ in 0..10 {
                 send_rf_frame_via(handle, &device, &rf_data)?;
                 thread::sleep(Duration::from_millis(2));
@@ -46,7 +44,6 @@ impl WirelessController {
     /// values + enables, text colors, LCD brightness, rotation, theme index,
     /// loop interval.
     pub fn set_aio_params(&self, mac: &[u8; 6], aio_param: &[u8; AIO_PARAM_LEN]) -> Result<()> {
-        let tx = self.tx.as_ref().context("TX device not connected")?;
         let device = self.device_by_mac_snapshot(mac)?;
         let master_mac = *self.master_mac.lock();
         let master_ch = *self.master_channel.lock();
@@ -62,9 +59,7 @@ impl WirelessController {
         rf_data[16] = seq_index;
         rf_data[18..18 + AIO_PARAM_LEN].copy_from_slice(aio_param);
 
-        with_transport_recovery(tx, &TX_IDS, "TX", |handle| {
-            send_rf_frame_via(handle, &device, &rf_data)
-        })?;
+        self.tx_recover(|handle| send_rf_frame_via(handle, &device, &rf_data))?;
 
         debug!(
             "set_aio_params sent to {} (pump_timer={}, theme={})",
@@ -89,7 +84,6 @@ impl WirelessController {
             bail!("AIO image payload is empty");
         }
 
-        let tx = self.tx.as_ref().context("TX device not connected")?;
         let device = self.device_by_mac_snapshot(mac)?;
         let master_mac = *self.master_mac.lock();
         let master_ch = *self.master_channel.lock();
@@ -98,7 +92,7 @@ impl WirelessController {
         let total_len = jpeg.len() as u16;
         let total_chunks = jpeg.len().div_ceil(PIC_CHUNK);
 
-        with_transport_recovery(tx, &TX_IDS, "TX", |handle| {
+        self.tx_recover(|handle| {
             for idx in 0..total_chunks {
                 let start = idx * PIC_CHUNK;
                 let end = (start + PIC_CHUNK).min(jpeg.len());
