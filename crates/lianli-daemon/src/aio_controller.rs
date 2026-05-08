@@ -83,7 +83,6 @@ fn run(wireless: Arc<WirelessController>, state: Arc<Mutex<State>>, stop_flag: A
     let mut last_sent: HashMap<[u8; 6], [u8; AIO_PARAM_LEN]> = HashMap::new();
     let mut last_sent_at: HashMap<[u8; 6], Instant> = HashMap::new();
     let mut switched: HashSet<[u8; 6]> = HashSet::new();
-    let mut applied_image: HashMap<[u8; 6], std::path::PathBuf> = HashMap::new();
 
     while !stop_flag.load(Ordering::Relaxed) {
         let cfg = {
@@ -178,45 +177,12 @@ fn run(wireless: Arc<WirelessController>, state: Arc<Mutex<State>>, stop_flag: A
             if let Err(e) = wireless.set_fan_speeds_by_mac(&device.mac, &fan_pwm) {
                 warn!("AIO {}: set_fan_speeds failed: {e:#}", device.mac_str());
             }
-
-            match &aio_cfg.custom_image_path {
-                Some(path) if applied_image.get(&device.mac) != Some(path) => {
-                    match lianli_media::image::encode_aio_image(path) {
-                        Ok(bytes) => match wireless.send_aio_pic(&device.mac, &bytes) {
-                            Ok(()) => {
-                                info!(
-                                    "AIO {}: custom image applied ({})",
-                                    device.mac_str(),
-                                    path.display()
-                                );
-                                applied_image.insert(device.mac, path.clone());
-                            }
-                            Err(e) => warn!("AIO {}: send_aio_pic failed: {e:#}", device.mac_str()),
-                        },
-                        Err(e) => warn!(
-                            "AIO {}: encode_aio_image({}) failed: {e:#}",
-                            device.mac_str(),
-                            path.display()
-                        ),
-                    }
-                }
-                None if applied_image.remove(&device.mac).is_some() => {
-                    if let Err(e) = wireless.switch_to_wireless_theme(&device.mac) {
-                        warn!(
-                            "AIO {}: switch_to_wireless_theme (clear image) failed: {e:#}",
-                            device.mac_str()
-                        );
-                    }
-                }
-                _ => {}
-            }
         }
 
         let live_macs: HashSet<[u8; 6]> = devices.iter().map(|d| d.mac).collect();
         last_sent.retain(|m, _| live_macs.contains(m));
         last_sent_at.retain(|m, _| live_macs.contains(m));
         switched.retain(|m| live_macs.contains(m));
-        applied_image.retain(|m, _| live_macs.contains(m));
 
         thread::sleep(TICK);
     }
