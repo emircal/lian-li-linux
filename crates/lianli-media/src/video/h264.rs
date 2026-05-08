@@ -173,6 +173,10 @@ pub(super) fn encoder_codec_args_file(
         }
     }
 
+    if !matches!(kind, EncoderKind::Vaapi | EncoderKind::Qsv) {
+        args.extend(["-pix_fmt".into(), "yuv420p".into()]);
+    }
+
     args
 }
 
