@@ -3,13 +3,13 @@ use std::path::Path;
 use std::process::Command;
 
 fn hwaccel_args() -> Vec<String> {
-    if std::env::var("LIANLI_DISABLE_HW_VIDEO")
+    if std::env::var("LIANLI_ENABLE_HW_VIDEO")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
     {
-        Vec::new()
-    } else {
         vec!["-hwaccel".into(), "auto".into()]
+    } else {
+        Vec::new()
     }
 }
 
