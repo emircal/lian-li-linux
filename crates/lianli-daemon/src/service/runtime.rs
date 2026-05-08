@@ -246,20 +246,34 @@ impl ActiveTarget {
         custom_h264: bool,
         tx: Option<Sender<DaemonEvent>>,
     ) -> Self {
-        let media = MediaRuntime::from_asset(Arc::clone(&asset), tx, &lcd, &screen, custom_h264);
+        let media =
+            MediaRuntime::from_asset(Arc::clone(&asset), tx.clone(), &lcd, &screen, custom_h264);
         let recovery_stop = Arc::new(AtomicBool::new(false));
         let recovery_thread = match &lcd {
             LcdBackend::HidLcd(d) => {
                 let lcd = Arc::clone(d);
                 let stop = Arc::clone(&recovery_stop);
+                let recovery_tx = tx.clone();
                 Some(thread::spawn(move || {
+                    use lianli_devices::traits::RecoveryAction;
                     while !stop.load(Ordering::Relaxed) {
                         thread::sleep(Duration::from_secs(2));
                         if stop.load(Ordering::Relaxed) {
                             break;
                         }
-                        if let Err(e) = lcd.lock().check_and_recover_lcd() {
-                            debug!("LCD[{index}] health check error: {e:#}");
+                        match lcd.lock().check_and_recover_lcd() {
+                            Ok(RecoveryAction::Recovered) => {
+                                if let Some(tx) = &recovery_tx {
+                                    tx.send(DaemonEvent::RecreateMedia {
+                                        target_index: index,
+                                    })
+                                    .ok();
+                                }
+                            }
+                            Ok(RecoveryAction::NoChange) => {}
+                            Err(e) => {
+                                debug!("LCD[{index}] health check error: {e:#}");
+                            }
                         }
                     }
                 }))

@@ -63,6 +63,9 @@ pub enum DaemonEvent {
     FrameFinished {
         asset: Arc<lianli_media::MediaAsset>,
     }, // A device has calculated a new frame, let's update the display
+    RecreateMedia {
+        target_index: usize,
+    },
     Shutdown, // SIGINT/SIGTERM received, exit the event loop cleanly
 }
 
@@ -409,6 +412,17 @@ impl ServiceManager {
                 DaemonEvent::FrameFinished { asset } => {
                     // which worker has a new image to send?
                     self.stream_target(asset);
+                }
+                DaemonEvent::RecreateMedia { target_index } => {
+                    if let Some(asset) = self.media_assets.get(&target_index).cloned() {
+                        if let Some(target) = self.targets.get_mut(&target_index) {
+                            info!(
+                                "[devices] LCD[{}] recreating media after recovery",
+                                target.device_identity
+                            );
+                            target.swap_media(asset, self.tx.clone());
+                        }
+                    }
                 }
             }
         }

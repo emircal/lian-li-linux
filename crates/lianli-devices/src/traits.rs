@@ -62,6 +62,12 @@ pub trait FanDevice: Send + Sync {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryAction {
+    NoChange,
+    Recovered,
+}
+
 /// A device with an LCD screen.
 pub trait LcdDevice: Send + Sync {
     fn screen_info(&self) -> &ScreenInfo;
@@ -72,8 +78,8 @@ pub trait LcdDevice: Send + Sync {
     fn set_brightness(&self, brightness: u8) -> Result<()>;
     fn set_rotation(&self, degrees: u16) -> Result<()>;
     fn initialize(&mut self) -> Result<()>;
-    fn check_and_recover_lcd(&mut self) -> Result<()> {
-        Ok(())
+    fn check_and_recover_lcd(&mut self) -> Result<RecoveryAction> {
+        Ok(RecoveryAction::NoChange)
     }
     fn supports_c_command(&self) -> bool {
         false

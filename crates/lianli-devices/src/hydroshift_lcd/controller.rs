@@ -286,9 +286,10 @@ impl HydroShiftLcdController {
         false
     }
 
-    pub fn check_and_recover_lcd(&mut self) -> Result<()> {
+    pub fn check_and_recover_lcd(&mut self) -> Result<crate::traits::RecoveryAction> {
+        use crate::traits::RecoveryAction;
         if !self.use_c_command {
-            return Ok(());
+            return Ok(RecoveryAction::NoChange);
         }
         const RECOVERY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(15);
         if self
@@ -296,25 +297,26 @@ impl HydroShiftLcdController {
             .map(|t| t.elapsed() < RECOVERY_COOLDOWN)
             .unwrap_or(false)
         {
-            return Ok(());
+            return Ok(RecoveryAction::NoChange);
         }
         match self.is_lcd_available() {
-            Ok(true) => Ok(()),
+            Ok(true) => Ok(RecoveryAction::NoChange),
             Ok(false) => {
                 warn!("LCD not available, attempting reset");
                 self.last_recovery_attempt = Some(Instant::now());
                 if self.reset_device() {
                     info!("Device reset successful, reinitializing LCD");
                     std::thread::sleep(std::time::Duration::from_millis(500));
-                    self.apply_lcd_settings()
+                    self.apply_lcd_settings()?;
+                    Ok(RecoveryAction::Recovered)
                 } else {
                     warn!("Device reset failed");
-                    Ok(())
+                    Ok(RecoveryAction::NoChange)
                 }
             }
             Err(e) => {
                 debug!("LCD availability check failed: {e:#}");
-                Ok(())
+                Ok(RecoveryAction::NoChange)
             }
         }
     }
@@ -617,7 +619,7 @@ impl LcdDevice for HydroShiftLcdController {
         Ok(())
     }
 
-    fn check_and_recover_lcd(&mut self) -> Result<()> {
+    fn check_and_recover_lcd(&mut self) -> Result<crate::traits::RecoveryAction> {
         HydroShiftLcdController::check_and_recover_lcd(self)
     }
 
