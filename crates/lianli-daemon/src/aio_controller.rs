@@ -13,11 +13,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::{debug, info, warn};
 
 const TICK: Duration = Duration::from_secs(1);
-const KEEPALIVE: Duration = Duration::from_secs(5);
 
 pub struct AioController {
     wireless: Arc<WirelessController>,
@@ -80,8 +79,6 @@ impl Drop for AioController {
 fn run(wireless: Arc<WirelessController>, state: Arc<Mutex<State>>, stop_flag: Arc<AtomicBool>) {
     let all_sensors = enumerate_sensors();
     let mut sensor_cache: HashMap<SensorSource, ResolvedSensor> = HashMap::new();
-    let mut last_sent: HashMap<[u8; 6], [u8; AIO_PARAM_LEN]> = HashMap::new();
-    let mut last_sent_at: HashMap<[u8; 6], Instant> = HashMap::new();
     let mut switched: HashSet<[u8; 6]> = HashSet::new();
 
     while !stop_flag.load(Ordering::Relaxed) {
@@ -89,7 +86,6 @@ fn run(wireless: Arc<WirelessController>, state: Arc<Mutex<State>>, stop_flag: A
             let mut s = state.lock();
             if s.needs_reinit {
                 switched.clear();
-                last_sent.clear();
                 s.needs_reinit = false;
             }
             s.config.clone()
@@ -127,28 +123,8 @@ fn run(wireless: Arc<WirelessController>, state: Arc<Mutex<State>>, stop_flag: A
             }
 
             let param = build_aio_param(aio_cfg, device, &curves, &mut sensor_cache, &all_sensors);
-            let now = Instant::now();
-            let needs_send = match last_sent.get(&device.mac) {
-                None => true,
-                Some(prev) => {
-                    *prev != param
-                        || last_sent_at
-                            .get(&device.mac)
-                            .map(|t| now.duration_since(*t) >= KEEPALIVE)
-                            .unwrap_or(true)
-                }
-            };
-
-            if needs_send {
-                match wireless.set_aio_params(&device.mac, &param) {
-                    Ok(()) => {
-                        last_sent.insert(device.mac, param);
-                        last_sent_at.insert(device.mac, now);
-                    }
-                    Err(e) => {
-                        warn!("AIO {}: set_aio_params failed: {e:#}", device.mac_str());
-                    }
-                }
+            if let Err(e) = wireless.set_aio_params(&device.mac, &param) {
+                warn!("AIO {}: set_aio_params failed: {e:#}", device.mac_str());
             }
 
             let mut fan_pwm = [0u8; 4];
@@ -180,8 +156,6 @@ fn run(wireless: Arc<WirelessController>, state: Arc<Mutex<State>>, stop_flag: A
         }
 
         let live_macs: HashSet<[u8; 6]> = devices.iter().map(|d| d.mac).collect();
-        last_sent.retain(|m, _| live_macs.contains(m));
-        last_sent_at.retain(|m, _| live_macs.contains(m));
         switched.retain(|m| live_macs.contains(m));
 
         thread::sleep(TICK);
